@@ -1,0 +1,45 @@
+name: quant-backtest
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_IMAGE: "${NODE_IMAGE:-node:22-alpine}"
+        PYTHON_IMAGE: "${PYTHON_IMAGE:-python:3.13-slim-bookworm}"
+        NPM_REGISTRY: "${NPM_REGISTRY:-https://registry.npmjs.org}"
+        PIP_INDEX_URL: "${PIP_INDEX_URL:-https://pypi.org/simple}"
+    image: quant-backtest:local
+    init: true
+    ports:
+      - "${PORT:-8000}:8000"
+    environment:
+      TZ: Asia/Shanghai
+      QUANT_DATA_SOURCE: "${QUANT_DATA_SOURCE:-auto}"
+      TUSHARE_TOKEN: "${TUSHARE_TOKEN:-}"
+    volumes:
+      - quant_data:/app/data
+      - quant_reports:/app/reports
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  quant_data:
+  quant_reports:

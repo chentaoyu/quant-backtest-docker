@@ -1,0 +1,16 @@
+data/
+reports/
+.venv/
+.uvcache/
+__pycache__/
+.env
+.env.local
+web/frontend/node_modules/
+web/frontend/.pnpm-store/
+web/frontend/.pnpm-home/
+web/frontend/dist/
+export/
+.DS_Store
+.pytest_cache/
+web/static/
+.claude/

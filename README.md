@@ -1,0 +1,261 @@
+# quant-backtest-docker
+
+A 股日线策略回测平台的 **Docker 一键部署版**：FastAPI + React/antd + backtesting.py，支持参数优化、样本外切分，以及持仓的策略体检和每日买卖建议。
+
+这是从 `quant-backtest` 复制出来的独立项目，原项目不会被覆盖；本次同时修复了 `QUANT_DATA_SOURCE=auto` 的解析 bug。
+
+## 一键启动
+
+前置：安装 Docker Desktop（或 Docker Engine + Compose 插件）。
+
+```bash
+cp .env.example .env
+# 可选：编辑 .env，填入 TUSHARE_TOKEN
+./scripts/docker-up.sh
+```
+
+打开：
+
+```text
+http://127.0.0.1:8000
+```
+
+也可以直接：
+
+```bash
+docker compose up -d --build
+```
+
+第一次构建会下载 Node/Python 依赖，通常需要几分钟；之后重建会复用缓存。
+
+## 新 ECS / 新机器一键部署
+
+把代码传到服务器后，执行一条命令即可（会检查/安装 Docker、生成 `.env`、构建、启动并等待健康检查）：
+
+```bash
+./scripts/deploy-ecs.sh
+```
+
+全自动、指定端口和 Tushare token：
+
+```bash
+./scripts/deploy-ecs.sh -y --port 8000 --token 你的token
+```
+
+国内网络建议加上镜像源参数（构建时的 npm / pip 走国内镜像）：
+
+```bash
+./scripts/deploy-ecs.sh -y --cn-mirror
+```
+
+其他参数见 `./scripts/deploy-ecs.sh --help`。脚本可重复执行：已存在的 `.env` 不会被覆盖，只更新显式传入的项。
+
+部署完成后记得在云厂商安全组放行端口，并且**不要直接把 8000 暴露到公网**（服务没有登录鉴权），建议只放行自己的 IP。
+
+## 数据在新机器上怎么办
+
+镜像不含数据：行情缓存（`/app/data`）和回测报告（`/app/reports`）都在命名卷里。新机器上是空的，**首次回测会按需拉取并缓存**，不影响使用，只是第一次慢一些。
+
+如果想把现有数据一起搬过去：
+
+```bash
+# 旧机器导出（文件属主是当前用户，不需要 sudo）
+docker run --rm -v quant-backtest_quant_data:/data quant-backtest:local \
+  tar czf - -C /data . > quant_data.tgz
+scp quant_data.tgz user@ecs:/opt/quant-backtest/
+
+# 新机器导入：先执行一次 deploy 让卷创建出来，再解包
+docker run --rm -i -v quant-backtest_quant_data:/data quant-backtest:local \
+  tar xzf - -C /data < quant_data.tgz
+docker compose restart web
+```
+
+报告卷同理，把卷名换成 `quant-backtest_quant_reports`。
+
+## 我的持仓：每日买卖建议
+
+页面顶部「我的持仓」：
+
+1. **导入**：从券商 App / Excel 复制持仓表格直接粘贴（识别“证券代码 / 股票余额 / 参考成本价”等表头），或上传 CSV；无表头时按 `代码,股数,成本价[,买入日期]`。同一只股票多行会按加权成本合并。
+2. **策略体检**（导入后自动跑，每只约 5–10 秒，30 天有效）：近 5 年滚动验证（训练 3 年 / 测试 1 年），6 个策略里样本外夏普最高且为正的作为这只股票的主策略；都不行就标记“无有效策略”。
+3. **今日建议**（每天收盘后刷新）：止损/止盈 > 主策略今日信号 > 持有 / 已离场；并给出**明日收盘触发价**（如“收盘 ≤ 45.24 触发买入”）和 6 策略多空共识。点行打开 K 线详情。
+
+持仓与体检结果保存在 `data/holdings.json`、`data/checkups.json`（Docker 下在 `quant_data` 卷里）。
+
+行情缓存每只股票一份（`{source}_{代码}_qfq.csv`），过了收盘时间自动增量补拉；检测到除权会全量重拉。旧版按区间命名的缓存首次读取时自动迁移。
+
+## 环境变量
+
+`.env` 由 Compose 自动读取：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `TUSHARE_TOKEN` | 空 | Tushare Pro token；不填则自动回退 akshare |
+| `QUANT_DATA_SOURCE` | `auto` | `auto` / `tushare` / `akshare` |
+| `PORT` | `8000` | 宿主机端口；被占用时改成 `8001` |
+| `NODE_IMAGE` | `node:22-alpine` | 前端构建基础镜像，可换镜像源 |
+| `PYTHON_IMAGE` | `python:3.13-slim-bookworm` | 运行基础镜像，可换镜像源 |
+| `NPM_REGISTRY` | `https://registry.npmjs.org` | 构建前端时的 npm 源，国内可换 npmmirror |
+| `PIP_INDEX_URL` | `https://pypi.org/simple` | 构建镜像时的 pip 源，国内可换清华源 |
+
+不填 token 也能启动，但首次拉取股票列表和行情会更慢，且 akshare 接口偶尔不稳定。
+
+## 架构
+
+```text
+浏览器
+  │ :8000
+  ▼
+┌─────────────────────────────────────────┐
+│ 单容器 quant-backtest                     │
+│                                         │
+│  FastAPI (web.app:app)                   │
+│    ├─ /api/*       回测/持仓/历史 API     │
+│    ├─ /reports/*   Bokeh HTML 报告        │
+│    └─ /             React 静态产物         │
+│                                         │
+│  /app/data      ← quant_data 命名卷       │
+│  /app/reports   ← quant_reports 命名卷    │
+└─────────────────────────────────────────┘
+        ▲
+        │ 多阶段构建
+┌───────┴──────────┐
+│ Node 22 + pnpm   │  React/antd → web/static
+│ Python 3.13      │  pip install → 运行依赖
+└──────────────────┘
+```
+
+设计取舍：
+
+- **单容器**：前端是纯静态文件，由 FastAPI 直接托管，不需要 Nginx、不需要处理 CORS；一键启动最简单。
+- **多阶段构建**：Node 和 pnpm 只存在于构建阶段，运行镜像不含 node_modules。
+- **非 root 运行**：容器内使用 `app` 用户；数据和报告写入命名卷。
+- **数据和报告持久化**：`docker compose down` 不会删数据；`down -v` 才会删除卷。
+- **单 worker**：回测执行有进程内锁，默认一个 uvicorn worker，避免同一批次并发写报告。
+
+## 常用命令
+
+```bash
+# 查看状态
+docker compose ps
+
+# 看日志
+docker compose logs -f web
+
+# 停止（保留数据）
+docker compose down
+
+# 重新构建并启动
+docker compose up -d --build
+
+# 删除容器 + 数据卷（会清空行情缓存和报告）
+docker compose down -v
+
+# 健康检查
+curl http://127.0.0.1:8000/api/health
+```
+
+## 数据与报告
+
+- 行情缓存：命名卷 `quant_data` → 容器内 `/app/data`
+- 回测报告：命名卷 `quant_reports` → 容器内 `/app/reports`
+- 页面里的「报告」「最近批次」直接读取容器内文件，不需要额外挂载。
+
+如果需要把报告导出到宿主机：
+
+```bash
+mkdir -p export/reports
+docker compose cp web:/app/reports/. ./export/reports/
+```
+
+## 开发模式
+
+只构建 Docker 镜像：
+
+```bash
+docker build -t quant-backtest:local .
+```
+
+本地不用 Docker 时：
+
+```bash
+uv sync
+
+# 新项目没有提交 web/static，先构建一次前端
+cd web/frontend
+pnpm install
+pnpm build
+cd ../..
+
+./scripts/start_web.sh
+```
+
+## 目录
+
+```text
+Dockerfile             多阶段构建（Node 前端 + Python 运行时）
+docker-compose.yml     端口、环境变量、命名卷、健康检查
+.dockerignore          排除 .env/data/reports/node_modules
+scripts/docker-up.sh   本地一键启动脚本
+scripts/deploy-ecs.sh  新机器/ECS 一键部署（Docker 检查 + 构建 + 健康检查）
+backtest_engine.py     回测执行 / 网格优化 / 滚动验证窗口
+data_loader.py         行情获取、缓存、校验
+stock_list.py          A 股股票列表
+signals.py             最新信号 / 明日触发价
+holdings.py            持仓存储与导入
+advisor.py             策略体检 / 持仓建议 / K 线数据
+tests/                 pytest（uv run pytest）
+strategies/            六个只做多策略
+web/app.py             FastAPI 入口
+web/frontend/          React + antd + ECharts 源码
+```
+
+## 常见问题
+
+### 端口被占用
+
+```bash
+PORT=8001 docker compose up -d --build
+# 打开 http://127.0.0.1:8001
+```
+
+### 页面显示 Tushare 未配置
+
+`.env` 的 `TUSHARE_TOKEN` 为空，或 token 无效。检查：
+
+```bash
+docker compose exec web printenv TUSHARE_TOKEN | wc -c
+```
+
+不要把这行命令的输出贴到公开地方。
+
+### Docker Hub 拉取基础镜像超时
+
+可以改用 ECR Public 镜像：
+
+```bash
+NODE_IMAGE=public.ecr.aws/docker/library/node:22-alpine \
+PYTHON_IMAGE=public.ecr.aws/docker/library/python:3.13-slim-bookworm \
+docker compose up -d --build
+```
+
+或者在 `.env` 里取消这两行的注释，再重新构建。
+
+### 构建时 pnpm 下载失败
+
+是网络问题，重试：
+
+```bash
+docker compose build --no-cache web
+```
+
+### 报告在宿主机看不到
+
+报告在命名卷里，不在项目目录；这是为了避免容器内 UID 和宿主机文件权限冲突。用页面查看，或按上面的 `docker compose cp` 导出。
+
+## 安全说明
+
+- 默认把端口映射到宿主机，**没有登录鉴权**，适合本机/内网使用；不要直接暴露到公网。
+- `.env` 已在 `.gitignore` 和 `.dockerignore` 中，token 不会打进镜像。
+- 容器以非 root 用户运行；数据卷只包含缓存、报告和股票列表。
+- 回测结果只用于研究，不构成投资建议。

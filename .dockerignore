@@ -1,0 +1,25 @@
+# 不要把本地产物、缓存和密钥打进镜像
+.git
+.gitignore
+.venv
+.uvcache
+__pycache__
+*.py[cod]
+.DS_Store
+
+.env
+.env.local
+.env.*
+!.env.example
+
+data
+reports
+web/static
+web/frontend/node_modules
+web/frontend/dist
+web/frontend/.pnpm-store
+web/frontend/.pnpm-home
+
+# 本地脚本/编辑器
+.mcp.json
+.claude

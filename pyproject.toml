@@ -1,0 +1,29 @@
+[project]
+name = "quant-backtest"
+version = "0.1.0"
+description = "A 股日线策略回测：参数优化、样本外验证与本地 Web 回测台"
+authors = [
+    { name = "suqin", email = "1002103870@qq.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "akshare>=1.19.3",
+    "backtesting>=0.6.6",
+    "fastapi>=0.162.0",
+    "pandas>=3.1.0",
+    "tushare>=1.4.29",
+    "uvicorn>=0.30",
+]
+
+[project.scripts]
+quant-backtest = "quant_backtest:main"
+
+[build-system]
+requires = ["uv_build>=0.12.15,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "httpx2>=2.16.0",
+    "pytest>=9.2.0",
+]

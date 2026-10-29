@@ -1,0 +1,342 @@
+import type { Dayjs } from "dayjs";
+
+export type Source = "auto" | "tushare" | "akshare";
+
+export interface Stock {
+  symbol: string;
+  name: string;
+  exchange: string;
+}
+
+export interface StockListResponse {
+  stocks: Stock[];
+  count: number;
+  source: string;
+  fetched_at: string | null;
+  warning: string | null;
+}
+
+export interface StrategyParam {
+  name: string;
+  label: string;
+  default: number;
+  min: number;
+  max: number;
+  step: number;
+}
+
+export interface RangeSpec {
+  start: number;
+  stop: number;
+  step: number;
+}
+
+export interface StrategyNotes {
+  logic?: string;
+  entry?: string;
+  exit?: string;
+  regime?: string;
+  risk?: string;
+}
+
+export interface StrategyMeta {
+  name: string;
+  label: string;
+  description: string;
+  notes?: StrategyNotes;
+  params: StrategyParam[];
+  defaults: Record<string, number>;
+  default_ranges: Record<string, RangeSpec>;
+}
+
+export interface CachedSymbol {
+  symbol: string;
+  sources: string[];
+  rows: number;
+  start: string;
+  end: string;
+}
+
+export interface Meta {
+  auto_source: string;
+  tushare_token: boolean;
+  sources: { value: string; label: string }[];
+  defaults: {
+    start: string;
+    end: string;
+    cash: number;
+    commission: number;
+  };
+  strategies: StrategyMeta[];
+  strategy_count: number;
+  symbols: CachedSymbol[];
+}
+
+export interface EquityPoint {
+  t: string;
+  e: number;
+  dd: number;
+}
+
+export interface Trade {
+  entry: string;
+  exit: string;
+  size: number;
+  entry_price: number;
+  exit_price: number;
+  pnl: number;
+  return_pct: number;
+  duration: string;
+}
+
+export type Metrics = Record<string, number | string | boolean | null>;
+
+export interface RunConfig {
+  symbol: string;
+  strategy: string;
+  source: string;
+  start: string;
+  end: string;
+  cash: number;
+  commission: number;
+  optimize: boolean;
+  split: string | null;
+  params: Record<string, number>;
+  ranges: Record<string, RangeSpec>;
+  refresh: boolean;
+}
+
+export interface DataMeta {
+  symbol: string;
+  source: string;
+  adjust: string;
+  cached: boolean;
+  cache_file: string;
+  fetched_at: string;
+  rows: number;
+  start: string;
+  end: string;
+  partial_bar_dropped: string | null;
+  warnings: string[];
+}
+
+export interface OosSegment {
+  rows: number;
+  start: string;
+  end: string;
+  params: Record<string, number>;
+  metrics: Metrics;
+}
+
+export interface OosBlock {
+  split: string;
+  mode: string;
+  train: OosSegment;
+  test_params: OosSegment;
+  test_default: OosSegment | null;
+  test_oracle: OosSegment | null;
+  sharpe_decay: number | null;
+  sharpe_decay_note: string;
+}
+
+export interface RunResult {
+  run_id: string;
+  created_at: string;
+  config: RunConfig;
+  data: DataMeta;
+  params: Record<string, number>;
+  metrics: Metrics;
+  equity: EquityPoint[];
+  trades: Trade[];
+  oos: OosBlock | null;
+  warnings: string[];
+  report_file: string;
+  report_url: string;
+  duration_sec: number;
+}
+
+export interface RunSummary {
+  run_id: string;
+  created_at: string;
+  symbol: string;
+  strategy: string;
+  source: string;
+  split: string | null;
+  return_pct: number | null;
+  sharpe: number | null;
+  report_url: string;
+}
+
+export interface FormValues {
+  symbol: string;
+  source: Source;
+  start: Dayjs;
+  end: Dayjs;
+  cash: number;
+  commissionPct: number;
+  strategy: string;
+  params: Record<string, number>;
+  optimize: boolean;
+  splitEnabled: boolean;
+  split: Dayjs | null;
+  ranges: Record<string, RangeSpec>;
+  refresh: boolean;
+}
+
+export interface BacktestPayload {
+  symbol: string;
+  source: string;
+  start: string;
+  end: string;
+  cash: number;
+  commission: number;
+  strategy: string;
+  optimize: boolean;
+  split: string | null;
+  params: Record<string, number>;
+  ranges: Record<string, RangeSpec>;
+  refresh: boolean;
+}
+// ---------------------------------------------------------------- 持仓
+export interface Holding {
+  symbol: string;
+  name: string;
+  shares: number;
+  cost_price: number;
+  buy_date: string | null;
+  stop_loss_pct: number | null;
+  take_profit_pct: number | null;
+  strategy: string | null;
+  note: string;
+}
+
+export interface Triggers {
+  action: "BUY" | "SELL";
+  fires_flat: boolean;
+  below: number | null;
+  above: number | null;
+}
+
+export interface SignalTrade {
+  entry_date: string;
+  entry_price: number;
+  exit_date: string | null;
+  exit_price: number | null;
+  return_pct: number | null;
+}
+
+export interface StrategySignal {
+  name: string;
+  label: string;
+  params: Record<string, number>;
+  oos_sharpe: number | null;
+  action: "BUY" | "SELL" | null;
+  hold: boolean;
+  hold_after: boolean;
+  since: string | null;
+  trades?: SignalTrade[];
+  triggers?: Triggers;
+}
+
+export type AdviceCode =
+  | "STOP_LOSS"
+  | "TAKE_PROFIT"
+  | "SELL"
+  | "BUY"
+  | "HOLD"
+  | "WAIT"
+  | "NO_STRATEGY"
+  | "UNCHECKED";
+
+export interface HoldingAnalysis extends Holding {
+  error: string | null;
+  data_date?: string;
+  close?: number;
+  prev_close?: number;
+  change_pct?: number | null;
+  market_value?: number;
+  pnl?: number;
+  pnl_pct?: number | null;
+  day_pnl?: number;
+  weight_pct?: number | null;
+  advice: { code: AdviceCode; label: string; color: string; reason: string } | null;
+  main?: StrategySignal | null;
+  consensus?: { bull: number; bear: number; total: number };
+  strategies?: StrategySignal[];
+  since_buy?: {
+    hold_return_pct: number | null;
+    max_dd_pct: number | null;
+    first_exit: { date: string; price: number; return_pct: number | null } | null;
+  } | null;
+  checkup?: { checked_at: string; stale: boolean; best: string | null } | null;
+  warnings?: string[];
+}
+
+export interface Job {
+  id: string;
+  status: "running" | "done";
+  total: number;
+  done: number;
+  current: string | null;
+  errors: Record<string, string>;
+  symbols: string[];
+  pending: string[];
+  avg_sec: number;
+  current_elapsed: number;
+}
+
+export interface HoldingsAnalysis {
+  summary: {
+    count: number;
+    market_value: number;
+    cost: number;
+    pnl: number;
+    pnl_pct: number | null;
+    day_pnl: number;
+    advice_counts: Partial<Record<AdviceCode, number>>;
+    data_date: string | null;
+  };
+  rows: HoldingAnalysis[];
+  job: Job | null;
+}
+
+export interface ImportRow {
+  line: number;
+  ok: boolean;
+  error: string | null;
+  merged: boolean;
+  raw: Record<string, string>;
+  item?: Holding;
+}
+
+export interface CheckupStrategy {
+  oos_sharpe: number | null;
+  oos_return_pct?: number | null;
+  oos_max_dd_pct?: number | null;
+  oos_trades?: number;
+  bh_return_pct?: number | null;
+  live_params: Record<string, number>;
+  error: string | null;
+}
+
+export interface Checkup {
+  symbol: string;
+  checked_at: string;
+  data_end: string;
+  best: string | null;
+  strategies: Record<string, CheckupStrategy>;
+}
+
+export type KlineBar = [string, number, number, number, number, number]; // 日期, 开, 收, 低, 高, 量
+
+export interface KlineResponse {
+  symbol: string;
+  bars: KlineBar[];
+  signal:
+    | (Omit<StrategySignal, "name" | "label" | "oos_sharpe"> & {
+        strategy: string;
+        trades: SignalTrade[];
+        triggers: Triggers;
+      })
+    | null;
+}
