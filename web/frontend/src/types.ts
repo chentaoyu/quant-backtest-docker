@@ -2,6 +2,47 @@ import type { Dayjs } from "dayjs";
 
 export type Source = "auto" | "tushare" | "akshare";
 
+// ---------------- 在线版本更新 ----------------
+
+export interface LatestRelease {
+  tag: string;
+  name: string;
+  published_at: string | null;
+  html_url: string | null;
+  notes: string;
+}
+
+export interface LastUpdateSummary {
+  state: string;
+  from_tag: string | null;
+  to_tag: string | null;
+  last_good_tag: string | null;
+  started_at: string | null;
+  finished_at: string | null;
+  error: string | null;
+}
+
+export interface VersionInfo {
+  current_version: string;
+  current_commit: string;
+  latest: LatestRelease | null;
+  has_update: boolean | null;
+  update_mode: string; // none | host-updater
+  warning: string | null;
+  last_update: LastUpdateSummary | null;
+}
+
+export interface UpdateStatus extends LastUpdateSummary {
+  stale?: boolean;
+  log_tail?: string;
+  mode?: string;
+}
+
+export interface TriggerResult {
+  triggered: boolean;
+  target: string;
+}
+
 export interface Stock {
   symbol: string;
   name: string;

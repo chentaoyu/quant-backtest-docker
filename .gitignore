@@ -10,6 +10,7 @@ web/frontend/.pnpm-store/
 web/frontend/.pnpm-home/
 web/frontend/dist/
 export/
+update-channel/
 .DS_Store
 .pytest_cache/
 web/static/

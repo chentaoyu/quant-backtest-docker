@@ -10,7 +10,10 @@ services:
         PYTHON_IMAGE: "${PYTHON_IMAGE:-python:3.13-slim-bookworm}"
         NPM_REGISTRY: "${NPM_REGISTRY:-https://registry.npmjs.org}"
         PIP_INDEX_URL: "${PIP_INDEX_URL:-https://pypi.org/simple}"
-    image: quant-backtest:local
+        APP_VERSION: "${APP_VERSION:-dev}"
+        APP_COMMIT: "${APP_COMMIT:-local}"
+    # 在线更新走 GHCR 镜像（CI 推送）；本地 docker compose build 会打同名 tag，两者互不冲突。
+    image: ghcr.io/chentaoyu/quant-backtest-docker:${IMAGE_TAG:-latest}
     init: true
     ports:
       - "${PORT:-8000}:8000"
@@ -18,9 +21,15 @@ services:
       TZ: Asia/Shanghai
       QUANT_DATA_SOURCE: "${QUANT_DATA_SOURCE:-auto}"
       TUSHARE_TOKEN: "${TUSHARE_TOKEN:-}"
+      # 在线更新：模式 / 令牌 / 可选 GitHub API token（提高版本检测限额）
+      UPDATE_MODE: "${UPDATE_MODE:-none}"
+      UPDATE_TOKEN: "${UPDATE_TOKEN:-}"
+      GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
     volumes:
       - quant_data:/app/data
       - quant_reports:/app/reports
+      # 与宿主机 updater（systemd + scripts/host-update.sh）交换更新请求/状态
+      - ./update-channel:/app/update-channel
     restart: unless-stopped
     healthcheck:
       test:

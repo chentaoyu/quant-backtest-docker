@@ -9,6 +9,9 @@ import type {
   Meta,
   SimAccountBrief,
   SimState,
+  TriggerResult,
+  UpdateStatus,
+  VersionInfo,
   WatchItem,
   WatchlistResponse,
   RunResult,
@@ -40,8 +43,28 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
+const updateHeaders = (token: string): RequestInit["headers"] => ({
+  "Content-Type": "application/json",
+  "X-Update-Token": token,
+});
+
 export const api = {
   meta: () => request<Meta>("/api/meta"),
+  // ---------------- 在线版本更新 ----------------
+  version: () => request<VersionInfo>("/api/version"),
+  updateStatus: () => request<UpdateStatus>("/api/update/status"),
+  triggerUpdate: (token: string) =>
+    request<TriggerResult>("/api/update", { method: "POST", headers: updateHeaders(token), body: "{}" }),
+  triggerRollback: (token: string) =>
+    request<TriggerResult>("/api/rollback", { method: "POST", headers: updateHeaders(token), body: "{}" }),
+  health: async (): Promise<boolean> => {
+    try {
+      const res = await fetch("/api/health", { cache: "no-store" });
+      return res.ok;
+    } catch {
+      return false;
+    }
+  },
   stocks: (refresh = false) => request<StockListResponse>(`/api/stocks${refresh ? "?refresh=true" : ""}`),
   runs: (limit = 30) => request<RunSummary[]>(`/api/runs?limit=${limit}`),
   run: (id: string) => request<RunResult>(`/api/runs/${encodeURIComponent(id)}`),

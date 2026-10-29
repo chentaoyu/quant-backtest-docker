@@ -14,6 +14,7 @@ __pycache__
 
 data
 reports
+update-channel
 web/static
 web/frontend/node_modules
 web/frontend/dist

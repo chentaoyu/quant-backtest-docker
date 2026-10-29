@@ -109,6 +109,9 @@ docker compose restart web
 | `PYTHON_IMAGE` | `python:3.13-slim-bookworm` | 运行基础镜像，可换镜像源 |
 | `NPM_REGISTRY` | `https://registry.npmjs.org` | 构建前端时的 npm 源，国内可换 npmmirror |
 | `PIP_INDEX_URL` | `https://pypi.org/simple` | 构建镜像时的 pip 源，国内可换清华源 |
+| `UPDATE_TOKEN` | 自动生成 | 在线更新令牌（deploy-ecs.sh 生成；页面首次更新时输入一次） |
+| `UPDATE_MODE` | `none` | `host-updater` = 启用宿主机在线更新服务；本地开发保持 `none` |
+| `IMAGE_TAG` | `latest` | 使用的 GHCR 镜像 tag（在线更新器会自动改写） |
 
 不填 token 也能启动，但首次拉取股票列表和行情会更慢，且 akshare 接口偶尔不稳定。
 
@@ -167,6 +170,44 @@ docker compose down -v
 curl http://127.0.0.1:8000/api/health
 ```
 
+## 在线版本更新
+
+页面右上角的版本徽章：查看当前版本 / 最新版本，一键更新到最新 Release，支持回滚。
+
+### 前提（一次性设置）
+
+1. **发版打 tag**：`git tag v0.3.0 && git push origin v0.3.0` → GitHub Actions 自动构建多架构镜像（amd64/arm64）推到 GHCR（`ghcr.io/chentaoyu/quant-backtest-docker:v0.3.0` 与 `:latest`），并创建 GitHub Release。之后每次发版同样打 tag。
+2. **GHCR 包设为 public**：首次 CI 推送后，在 GitHub 仓库页右侧 Packages → 镜像 → Package settings → Change visibility → Public（ECS 匿名拉取才不需要凭证）。
+3. **ECS 装好 updater**：`./scripts/deploy-ecs.sh` 自动完成（生成 UPDATE_TOKEN、安装 systemd path unit）。
+
+### 更新流程
+
+```text
+浏览器点击「更新到 vX.Y.Z」
+   │  POST /api/update（X-Update-Token 令牌校验）
+   ▼
+FastAPI 写 update-channel/update_request.json
+   │
+   ▼  systemd path unit 监听到文件出现，触发 host-update.sh
+宿主机：git 同步到目标 tag → 改写 .env 的 IMAGE_TAG
+   → docker compose pull web（失败即止，容器不动）
+   → docker compose up -d --wait（替换容器并等健康检查）
+   │
+   ▼  新版本起不来时自动回滚：IMAGE_TAG=last_good → pull → up
+前端轮询 /api/health，恢复后自动刷新页面
+```
+
+### 说明
+
+- **数据安全**：`quant_data` / `quant_reports` 命名卷不受更新影响。
+- **更新令牌**：`.env` 的 `UPDATE_TOKEN`（deploy-ecs.sh 自动生成），前端首次使用输入一次即记住；这是唯一需要鉴权的接口。
+- **回滚**：页面一键回滚到最近一次成功版本（本地旧镜像还在，秒级）；新版本启动失败也会自动回滚。
+- **对齐保证**：镜像与 compose/脚本来自同一个 git tag，host-update.sh 更新时会 `git reset` 到目标 tag。
+- **任务中断**：更新会重启容器，正在运行的回测/体检任务会被中断，触发前页面有提示。
+- **查看日志**：`journalctl -u quant-updater.service -f`；完整执行日志在 `update-channel/update.log`（页面也会展示尾部）。
+- **本地开发**（`UPDATE_MODE=none`）：页面只读版本信息，更新入口显示手动命令。
+- **首次部署**：CI 镜像不存在时 deploy-ecs.sh 自动回退本地构建；打完第一个 tag 后，线上即可页面更新。
+
 ## 数据与报告
 
 - 行情缓存：命名卷 `quant_data` → 容器内 `/app/data`
@@ -210,6 +251,8 @@ docker-compose.yml     端口、环境变量、命名卷、健康检查
 .dockerignore          排除 .env/data/reports/node_modules
 scripts/docker-up.sh   本地一键启动脚本
 scripts/deploy-ecs.sh  新机器/ECS 一键部署（Docker 检查 + 构建 + 健康检查）
+scripts/host-update.sh 宿主机在线更新执行器（git 同步 + compose pull + up）
+scripts/quant-updater.path/.service  systemd 触发器（监听更新请求文件）
 backtest_engine.py     回测执行 / 网格优化 / 滚动验证窗口
 data_loader.py         行情获取、缓存、校验
 stock_list.py          A 股股票列表
@@ -221,7 +264,9 @@ sim.py                 模拟仓（跟单 + 手动单重放）
 tests/                 pytest（uv run pytest）
 strategies/            六个只做多策略
 web/app.py             FastAPI 入口
+web/update_api.py      在线更新 API（版本检测 / 触发 / 状态 / 回滚）
 web/frontend/          React + antd + ECharts 源码
+.github/workflows/release.yml  CI：构建镜像推 GHCR + 创建 Release
 ```
 
 ## 常见问题

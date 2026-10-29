@@ -145,13 +145,46 @@ if ! grep -Eq '^TUSHARE_TOKEN=.+' .env; then
   echo "提示：TUSHARE_TOKEN 为空，将自动回退到 akshare（免 token，首次取数较慢）。"
 fi
 
+# ---------------------------------------------------------------- 在线更新
+# 生成更新令牌（幂等：已存在则不覆盖）
+if ! grep -Eq '^UPDATE_TOKEN=.+' .env; then
+  TOKEN_GEN="$(openssl rand -hex 16 2>/dev/null || head -c 16 /dev/urandom | od -An -tx1 | tr -d ' \n')"
+  set_env UPDATE_TOKEN "$TOKEN_GEN"
+  echo "已生成在线更新令牌（页面首次触发更新时输入；查看：grep UPDATE_TOKEN .env）"
+fi
+set_env UPDATE_MODE "host-updater"
+mkdir -p "$ROOT/update-channel"
+chmod 0777 "$ROOT/update-channel" 2>/dev/null || true
+
+# 安装宿主机更新执行器：systemd path unit 监听 update-channel/update_request.json
+if command -v systemctl >/dev/null 2>&1; then
+  sed "s|@ROOT@|$ROOT|g" "$ROOT/scripts/quant-updater.path" | $SUDO tee /etc/systemd/system/quant-updater.path >/dev/null
+  sed "s|@ROOT@|$ROOT|g" "$ROOT/scripts/quant-updater.service" | $SUDO tee /etc/systemd/system/quant-updater.service >/dev/null
+  $SUDO systemctl daemon-reload
+  $SUDO systemctl enable --now quant-updater.path >/dev/null 2>&1 || true
+  echo "已安装在线更新服务（quant-updater.path）"
+else
+  echo "未检测到 systemd（Mac/WSL 等），跳过在线更新服务安装。"
+  echo "手动更新命令：git pull && docker compose pull web && docker compose up -d"
+fi
+
 # ---------------------------------------------------------------- 构建与启动
+# 优先使用 CI 推送的 GHCR 镜像（与 GitHub Release 严格对应）；拉不到时回退本地构建。
 if [[ $SKIP_BUILD -eq 1 ]]; then
   echo "跳过构建，直接启动..."
   $SUDO docker compose up -d --no-build
+elif $SUDO docker compose pull web 2>/dev/null; then
+  echo "已拉取 CI 镜像，启动..."
+  $SUDO docker compose up -d --no-build
 else
-  echo "开始构建并启动（首次需要几分钟）..."
-  $SUDO docker compose up -d --build
+  echo "CI 镜像不可用（未发版或网络不通），本地构建启动（首次需要几分钟）..."
+  BV="$(git describe --tags --always 2>/dev/null || echo dev)"
+  BC="$(git rev-parse --short HEAD 2>/dev/null || echo local)"
+  if [[ -n "$SUDO" ]]; then
+    $SUDO env APP_VERSION="$BV" APP_COMMIT="$BC" docker compose up -d --build
+  else
+    APP_VERSION="$BV" APP_COMMIT="$BC" docker compose up -d --build
+  fi
 fi
 
 # ---------------------------------------------------------------- 健康检查
@@ -196,4 +229,7 @@ cat <<EOF
   1. 服务没有登录鉴权，请用安全组/防火墙限制来源 IP，不要直接暴露到公网。
   2. 行情缓存和报告在命名卷里；新机器首次回测会按需拉取数据。
   3. 修改 .env（如填 TUSHARE_TOKEN）后需要 docker compose up -d 重新创建容器。
+  4. 在线更新：页面右上角版本徽章 → 更新到最新版（首次需输入令牌，grep UPDATE_TOKEN .env 查看）。
+     前提：仓库打过 v* tag 触发 CI 构建镜像，且 GHCR 包已设为 public（GitHub 仓库页右侧 Packages 设置）。
+     更新执行器：systemctl status quant-updater.path / journalctl -u quant-updater.service
 EOF

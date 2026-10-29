@@ -1,0 +1,11 @@
+[Unit]
+Description=quant-backtest 在线更新执行器
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# 拉镜像 + 等健康检查可能要几分钟，不能被 systemd 默认 90s 掐掉
+TimeoutStartSec=1800
+ExecStart=@ROOT@/scripts/host-update.sh
+WorkingDirectory=@ROOT@

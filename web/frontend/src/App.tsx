@@ -1,5 +1,6 @@
 import {
   App as AntApp,
+  Badge,
   Button,
   Card,
   Col,
@@ -21,6 +22,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
 import ConfigPanel from "./components/ConfigPanel";
 import HistoryPanel from "./components/HistoryPanel";
+import UpdateModal from "./components/UpdateModal";
 import HoldingsPanel from "./components/HoldingsPanel";
 import SimPanel from "./components/SimPanel";
 import WatchlistPanel from "./components/WatchlistPanel";
@@ -32,6 +34,7 @@ import type {
   RunResult,
   RunSummary,
   Stock,
+  VersionInfo,
 } from "./types";
 
 const { Text } = Typography;
@@ -58,6 +61,16 @@ export default function App() {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [result, setResult] = useState<RunResult | null>(null);
   const [running, setRunning] = useState(false);
+
+  // 版本信息（右上角徽章 + 在线更新弹窗）
+  const [updateOpen, setUpdateOpen] = useState(false);
+  const [versionInfo, setVersionInfo] = useState<VersionInfo | null>(null);
+  useEffect(() => {
+    api
+      .version()
+      .then(setVersionInfo)
+      .catch(() => {});
+  }, []);
   const [elapsed, setElapsed] = useState(0);
   const [loadingRun, setLoadingRun] = useState(false);
   const [activeRun, setActiveRun] = useState<string | null>(null);
@@ -321,6 +334,17 @@ export default function App() {
                 </Tag>
               </Tooltip>
             )}
+            <Tooltip title="版本与在线更新">
+              <Badge dot={versionInfo?.has_update === true} color="green" offset={[-4, 0]}>
+                <Tag
+                  color={versionInfo?.has_update ? "processing" : "default"}
+                  style={{ cursor: "pointer", marginInlineEnd: 0 }}
+                  onClick={() => setUpdateOpen(true)}
+                >
+                  {versionInfo ? `v${versionInfo.current_version}` : "版本"}
+                </Tag>
+              </Badge>
+            </Tooltip>
             <Tag>本地</Tag>
           </Space>
         </div>
@@ -434,6 +458,8 @@ export default function App() {
           )}
         </div>
       </Layout.Content>
+
+      <UpdateModal open={updateOpen} onClose={() => setUpdateOpen(false)} />
     </Layout>
   );
 }

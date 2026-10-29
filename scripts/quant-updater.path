@@ -1,0 +1,10 @@
+[Unit]
+Description=监听 quant-backtest 在线更新请求
+
+[Path]
+PathExists=@ROOT@/update-channel/update_request.json
+PathChanged=@ROOT@/update-channel/update_request.json
+Unit=quant-updater.service
+
+[Install]
+WantedBy=multi-user.target

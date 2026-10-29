@@ -34,6 +34,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     TZ=Asia/Shanghai
 
+# 构建时注入的版本信息（CI / deploy 脚本通过 build args 传入）
+ARG APP_VERSION=dev
+ARG APP_COMMIT=unknown
+ENV APP_VERSION=${APP_VERSION} APP_COMMIT=${APP_COMMIT}
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends tzdata \
     && rm -rf /var/lib/apt/lists/*

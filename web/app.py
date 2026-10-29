@@ -39,6 +39,7 @@ import holdings  # noqa: E402
 import sim  # noqa: E402
 import watchlist  # noqa: E402
 from strategies import STRATEGIES  # noqa: E402
+from web.update_api import router as update_router  # noqa: E402
 
 # Web 端不把进度条刷到服务日志里（CLI 保留进度条）
 from backtesting import backtesting as _bt  # noqa: E402
@@ -60,6 +61,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="quant-backtest 本地回测台", version="0.3.0", lifespan=lifespan)
 app.add_middleware(GZipMiddleware, minimum_size=1024)
+app.include_router(update_router)
 WEB_RUNS_DIR.mkdir(parents=True, exist_ok=True)
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
