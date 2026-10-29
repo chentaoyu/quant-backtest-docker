@@ -29,6 +29,12 @@ REQ="$CHANNEL/update_request.json"
 STATUS="$CHANNEL/update_status.json"
 LOG="$CHANNEL/update.log"
 
+# docker 定位：launchd（macOS）/精简 PATH 环境里 docker 常不在 PATH，主动补查常见位置
+if ! command -v docker >/dev/null 2>&1; then
+  for _d in /usr/local/bin /opt/homebrew/bin; do
+    if [[ -x "$_d/docker" ]]; then PATH="$_d:$PATH"; break; fi
+  done
+fi
 SUDO=""
 command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 || SUDO="sudo"
 
