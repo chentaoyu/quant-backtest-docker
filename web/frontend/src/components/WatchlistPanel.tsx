@@ -1,6 +1,7 @@
 import {
   App as AntApp,
   Alert,
+  AutoComplete,
   Button,
   Card,
   Col,
@@ -29,13 +30,16 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { cnColor, paramsText, pct, ratio } from "../format";
 import { useCheckupJob } from "../hooks/useCheckupJob";
-import type { KlineResponse, Meta, WatchRow, WatchlistResponse } from "../types";
+import type { KlineResponse, Meta, Stock, WatchRow, WatchlistResponse } from "../types";
 import { triggerText } from "./HoldingDrawer";
 import KlineChart, { type PriceLine } from "./KlineChart";
 import SimJoinModal from "./SimJoinModal";
+import StockSelect from "./StockSelect";
 
 interface Props {
   meta: Meta;
+  stocks: Stock[];
+  stocksLoading: boolean;
 }
 
 const SOURCE_TEXT = { auto: "自动 · 体检参数", checkup: "体检参数", default: "默认参数", manual: "手动参数" };
@@ -56,14 +60,14 @@ function signalTag(row: WatchRow) {
   );
 }
 
-export default function WatchlistPanel({ meta }: Props) {
+export default function WatchlistPanel({ meta, stocks, stocksLoading }: Props) {
   const { message } = AntApp.useApp();
   const [data, setData] = useState<WatchlistResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [group, setGroup] = useState("全部");
   const [onlySignal, setOnlySignal] = useState(false);
   const [adding, setAdding] = useState(false);
-  const [addText, setAddText] = useState("");
+  const [picked, setPicked] = useState<string[]>([]);
   const [addGroup, setAddGroup] = useState("");
   const [editing, setEditing] = useState<WatchRow | null>(null);
   const [detail, setDetail] = useState<WatchRow | null>(null);
@@ -101,13 +105,13 @@ export default function WatchlistPanel({ meta }: Props) {
 
   const add = async () => {
     try {
-      const result = await api.addWatch(addText, addGroup || undefined);
+      const result = await api.addWatch(picked.join(" "), addGroup || undefined);
       const parts = [`新增 ${result.added.length} 只`];
       if (result.skipped.length) parts.push(`已存在 ${result.skipped.length} 只`);
       if (result.invalid.length) parts.push(`代码不存在：${result.invalid.join("、")}`);
       message.info(parts.join("，"));
       setAdding(false);
-      setAddText("");
+      setPicked([]);
       if (result.job) setJob(result.job);
       void load();
     } catch (error) {
@@ -294,10 +298,34 @@ export default function WatchlistPanel({ meta }: Props) {
         </Typography.Paragraph>
       </Card>
 
-      <Modal title="添加自选" open={adding} onCancel={() => setAdding(false)} onOk={() => void add()} okButtonProps={{ disabled: !addText.trim() }}>
+      <Modal
+        title="添加自选"
+        open={adding}
+        onCancel={() => setAdding(false)}
+        onOk={() => void add()}
+        okText={picked.length ? `添加 ${picked.length} 只` : "添加"}
+        okButtonProps={{ disabled: !picked.length }}
+      >
         <Space direction="vertical" style={{ width: "100%" }}>
-          <Input.TextArea rows={5} value={addText} onChange={(e) => setAddText(e.target.value)} placeholder="粘贴股票代码，空格/逗号/换行分隔，例如：600519 000858 300750" />
-          <Input value={addGroup} onChange={(e) => setAddGroup(e.target.value)} placeholder={`分组（选填，默认“默认”）`} maxLength={20} />
+          <StockSelect
+            multiple
+            stocks={stocks}
+            loading={stocksLoading}
+            value={picked}
+            onChange={setPicked}
+            disabledSymbols={data?.rows.map((r) => r.symbol)}
+          />
+          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+            输入代码或名称搜索，可连续选多只；已在自选里的股票会标为“已添加”。
+          </Typography.Text>
+          <AutoComplete
+            style={{ width: "100%" }}
+            value={addGroup}
+            onChange={(v) => setAddGroup(String(v ?? "").slice(0, 20))}
+            options={(data?.groups ?? []).map((g) => ({ value: g }))}
+            placeholder="分组（选填，默认“默认”；可选已有分组或输入新名称）"
+            allowClear
+          />
         </Space>
       </Modal>
 

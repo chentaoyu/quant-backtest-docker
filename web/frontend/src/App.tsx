@@ -355,7 +355,7 @@ export default function App() {
               </div>
 
               {view === "watchlist" && meta ? (
-                <WatchlistPanel meta={meta} />
+                <WatchlistPanel meta={meta} stocks={stocks} stocksLoading={stocksLoading} />
               ) : view === "sim" ? (
                 <SimPanel stocks={stocks} stocksLoading={stocksLoading} />
               ) : view === "holdings" && meta ? (
