@@ -32,7 +32,8 @@ LOG="$CHANNEL/update.log"
 SUDO=""
 command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1 || SUDO="sudo"
 
-now() { date -Is; }
+# GNU date 支持 -Is，macOS BSD date 不支持，用通用格式（Python fromisoformat 兼容两种）
+now() { date +%Y-%m-%dT%H:%M:%S%z; }
 log() { echo "[$(now)] $*" | tee -a "$LOG"; }
 
 # 日志瘦身：超过 1MB 只保留后半
@@ -90,10 +91,26 @@ get_env() {
 }
 
 # ---------------------------------------------------------------- 并发保护
-exec 9>/tmp/quant-updater.lock
-if ! flock -n 9; then
-  log "已有另一个更新实例在运行，退出"
-  exit 0
+# Linux 用 flock；macOS 无 flock 时用 mkdir 原子锁（进程被杀由下面的陈旧清理兜底）
+if command -v flock >/dev/null 2>&1; then
+  exec 9>/tmp/quant-updater.lock
+  if ! flock -n 9; then
+    log "已有另一个更新实例在运行，退出"
+    exit 0
+  fi
+else
+  LOCKDIR="/tmp/quant-updater.lockdir"
+  if ! mkdir "$LOCKDIR" 2>/dev/null; then
+    if [[ -n "$(find "$LOCKDIR" -maxdepth 0 -mmin +40 2>/dev/null)" ]]; then
+      log "发现陈旧锁（超过 40 分钟），清理后接管"
+      rm -rf "$LOCKDIR"
+      mkdir "$LOCKDIR" 2>/dev/null || { log "获取锁失败，退出"; exit 0; }
+    else
+      log "已有另一个更新实例在运行，退出"
+      exit 0
+    fi
+  fi
+  trap 'rmdir "$LOCKDIR" 2>/dev/null || true' EXIT
 fi
 
 # ---------------------------------------------------------------- 读取请求
@@ -143,6 +160,11 @@ log "===== 开始 $TYPE：$FROM_TAG → $TO_TAG（last_good=$LASTGOOD） ====="
 
 # ---------------------------------------------------------------- git 同步到目标 tag
 # 镜像和部署文件（compose/脚本）来自同一个 tag，保持严格对齐。
+# 保护开发机（Mac 本地更新）：工作区有未提交改动时中止，避免 git reset --hard 吞掉 WIP。
+# ECS 部署机是干净 clone，此检查恒通过。
+if ! git diff --quiet 2>/dev/null || ! git diff --cached --quiet 2>/dev/null; then
+  fail "本地仓库有未提交改动，为避免丢失已中止（容器仍是 $FROM_TAG）；请先 commit 或 stash 后重试"
+fi
 if git fetch origin --tags --prune >>"$LOG" 2>&1; then
   if git rev-parse -q --verify "refs/tags/$TO_TAG" >/dev/null 2>&1; then
     if git reset --hard "refs/tags/$TO_TAG" >>"$LOG" 2>&1; then

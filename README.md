@@ -210,6 +210,18 @@ FastAPI 写 update-channel/update_request.json
 前端轮询 /api/health，恢复后自动刷新页面
 ```
 
+### 本地 Mac 也用在线更新（可选）
+
+Mac 没有 systemd，默认走「本地开发模式」（页面只显示手动命令）。想在本机体验和线上完全一样的点击更新，跑一次安装脚本（幂等）：
+
+```bash
+./scripts/local-update-setup.sh
+```
+
+它会把令牌/模式写进 `.env`、固化当前镜像 tag，并安装 launchd WatchPaths 代理（macOS 版的 systemd path unit）监听 `update-channel/`。之后：GitHub 打新 tag → 页面红点 → 点击更新，和 ECS 行为一致。
+
+注意：更新器会 `git reset --hard` 到目标 tag，本地有未提交改动时会**自动中止**而不是吞掉它们——先 commit 或 stash 再点更新；更新后仓库处于 detached HEAD（对齐镜像版本），继续开发前 `git checkout main`。
+
 ### 说明
 
 - **数据安全**：`quant_data` / `quant_reports` 命名卷不受更新影响。
@@ -218,7 +230,7 @@ FastAPI 写 update-channel/update_request.json
 - **对齐保证**：镜像与 compose/脚本来自同一个 git tag，host-update.sh 更新时会 `git reset` 到目标 tag。
 - **任务中断**：更新会重启容器，正在运行的回测/体检任务会被中断，触发前页面有提示。
 - **查看日志**：`journalctl -u quant-updater.service -f`；完整执行日志在 `update-channel/update.log`（页面也会展示尾部）。
-- **本地开发**（`UPDATE_MODE=none`）：页面只读版本信息，更新入口显示手动命令。
+- **本地开发**（`UPDATE_MODE=none`）：页面只读版本信息，更新入口显示手动命令；想开启点击更新见上面的「本地 Mac 也用在线更新」。
 - **首次部署**：CI 镜像不存在时 deploy-ecs.sh 自动回退本地构建；打完第一个 tag 后，线上即可页面更新。
 
 ## 数据与报告

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.quant-backtest.updater</string>
+
+    <!-- 等价 systemd path unit：update-channel/ 目录内容变化时触发 host-update.sh -->
+    <key>WatchPaths</key>
+    <array>
+        <string>@ROOT@/update-channel</string>
+    </array>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>@ROOT@/scripts/host-update.sh</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>@ROOT@</string>
+    <key>StandardOutPath</key>
+    <string>@ROOT@/update-channel/launchd.log</string>
+    <key>StandardErrorPath</key>
+    <string>@ROOT@/update-channel/launchd.log</string>
+</dict>
+</plist>
