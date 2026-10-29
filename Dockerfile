@@ -48,7 +48,7 @@ RUN PIP_INDEX_URL="${PIP_INDEX_URL}" pip install --upgrade pip \
     && PIP_INDEX_URL="${PIP_INDEX_URL}" pip install .
 
 # 应用代码。
-COPY backtest_engine.py data_loader.py stock_list.py run_backtest.py signals.py holdings.py advisor.py ./
+COPY backtest_engine.py data_loader.py stock_list.py run_backtest.py signals.py holdings.py advisor.py watchlist.py sim.py ./
 COPY strategies ./strategies
 COPY web/__init__.py web/app.py ./web/
 COPY --from=frontend /src/web/static ./web/static

@@ -22,6 +22,8 @@ import { api } from "./api";
 import ConfigPanel from "./components/ConfigPanel";
 import HistoryPanel from "./components/HistoryPanel";
 import HoldingsPanel from "./components/HoldingsPanel";
+import SimPanel from "./components/SimPanel";
+import WatchlistPanel from "./components/WatchlistPanel";
 import ResultPanel from "./components/ResultPanel";
 import type {
   BacktestPayload,
@@ -34,7 +36,7 @@ import type {
 
 const { Text } = Typography;
 
-type View = "single" | "holdings";
+type View = "single" | "holdings" | "watchlist" | "sim";
 
 function fallbackStocks(meta: Meta): Stock[] {
   return meta.symbols.map((item) => ({
@@ -301,7 +303,7 @@ export default function App() {
             <div className="brand-logo">Q</div>
             <div>
               <div className="brand-title">量化回测台</div>
-              <div className="brand-sub">A 股日线 · 6 策略 · 持仓建议</div>
+              <div className="brand-sub">A 股日线 · 持仓建议 · 自选 · 模拟仓</div>
             </div>
           </div>
           <Space size={6} wrap>
@@ -346,11 +348,17 @@ export default function App() {
                   items={[
                     { key: "single", label: "单标的回测" },
                     { key: "holdings", label: "我的持仓" },
+                    { key: "watchlist", label: "自选股" },
+                    { key: "sim", label: "模拟仓" },
                   ]}
                 />
               </div>
 
-              {view === "holdings" && meta ? (
+              {view === "watchlist" && meta ? (
+                <WatchlistPanel meta={meta} />
+              ) : view === "sim" ? (
+                <SimPanel stocks={stocks} stocksLoading={stocksLoading} />
+              ) : view === "holdings" && meta ? (
                 <HoldingsPanel meta={meta} stocks={stocks} stocksLoading={stocksLoading} />
               ) : (
             <Row gutter={[16, 16]} align="top">

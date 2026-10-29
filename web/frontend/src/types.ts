@@ -340,3 +340,147 @@ export interface KlineResponse {
       })
     | null;
 }
+
+// ---------------------------------------------------------------- 自选股
+export interface WatchItem {
+  symbol: string;
+  name: string;
+  group: string;
+  strategy: string | null;
+  params: Record<string, number> | null;
+  note: string;
+}
+
+export interface WatchRow extends WatchItem {
+  error: string | null;
+  data_date?: string;
+  close?: number;
+  change_pct?: number | null;
+  used: {
+    name: string;
+    label: string;
+    params: Record<string, number>;
+    source: "auto" | "checkup" | "default" | "manual";
+    oos_sharpe: number | null;
+  } | null;
+  signal: {
+    action: "BUY" | "SELL" | null;
+    hold: boolean;
+    hold_after: boolean;
+    since: string | null;
+    triggers: Triggers;
+    last_event: { date: string; action: "BUY" | "SELL"; price: number } | null;
+  } | null;
+  sharpes?: Record<string, number | null>;
+  checkup?: { checked_at: string; best: string | null } | null;
+  sim: { account_id: string; account: string; slot_id: string }[];
+}
+
+export interface WatchlistResponse {
+  rows: WatchRow[];
+  groups: string[];
+  signal_count: number;
+  job: Job | null;
+}
+
+// ---------------------------------------------------------------- 模拟仓
+export interface SimAccountBrief {
+  id: string;
+  name: string;
+  initial_cash: number;
+  created_date: string;
+}
+
+export interface SimTrade {
+  date: string;
+  symbol: string;
+  name: string;
+  side: "BUY" | "SELL";
+  price: number;
+  shares: number;
+  fee: number;
+  pnl: number | null;
+  return_pct?: number;
+  source: "strategy" | "manual";
+  strategy?: string;
+}
+
+export interface SimSlot {
+  id: string;
+  symbol: string;
+  name: string;
+  strategy: string;
+  label?: string;
+  params: Record<string, number>;
+  cash: number;
+  start_date: string;
+  end_date: string | null;
+  entry_on_start: boolean;
+  status: "active" | "stopping" | "stopped" | "error";
+  shares: number;
+  cost?: number | null;
+  close?: number;
+  value: number;
+  pending: "BUY" | "SELL" | null;
+  notes: { date: string; note: string }[];
+  error?: string;
+}
+
+export interface SimOrder {
+  id: string;
+  symbol: string;
+  name: string;
+  side: "BUY" | "SELL";
+  shares: number;
+  placed_date: string;
+  status: "pending" | "filled" | "failed" | "cancelled";
+  fill: { date: string; price: number; fee: number } | null;
+  reason: string | null;
+}
+
+export interface SimPosition {
+  symbol: string;
+  name: string;
+  source: "strategy" | "manual";
+  strategy: string | null;
+  shares: number;
+  cost: number;
+  close: number;
+  market_value: number;
+  pnl: number;
+}
+
+export interface SimScore {
+  strategy: string;
+  label: string;
+  slots: number;
+  closed_trades: number;
+  win_rate_pct: number | null;
+  avg_return_pct: number | null;
+  profit_factor: number | null;
+  pnl: number;
+  checkup_sharpe: number | null;
+}
+
+export interface SimState {
+  account: SimAccountBrief & { fees: Record<string, number> };
+  summary: {
+    equity: number;
+    cash: number;
+    slot_cash: number;
+    market_value: number;
+    pnl: number;
+    pnl_pct: number;
+    day_pnl: number;
+    max_dd_pct: number | null;
+    days: number;
+    data_date: string | null;
+  };
+  curve: { date: string; equity: number }[];
+  benchmark: { name: string; series: Record<string, number>; return_pct: number } | null;
+  slots: SimSlot[];
+  positions: SimPosition[];
+  orders: SimOrder[];
+  trades: SimTrade[];
+  scorecard: SimScore[];
+}

@@ -7,6 +7,10 @@ import type {
   Job,
   KlineResponse,
   Meta,
+  SimAccountBrief,
+  SimState,
+  WatchItem,
+  WatchlistResponse,
   RunResult,
   RunSummary,
   StockListResponse,
@@ -67,4 +71,31 @@ export const api = {
     request<KlineResponse>(
       `/api/kline/${encodeURIComponent(symbol)}?days=${days}${strategy ? `&strategy=${strategy}` : ""}`,
     ),
+  watchlist: () => request<WatchlistResponse>("/api/watchlist"),
+  saveWatch: (item: Partial<WatchItem>) =>
+    request<{ item: WatchItem; job: Job | null }>("/api/watchlist", json("PUT", item)),
+  addWatch: (text: string, group?: string) =>
+    request<{ added: string[]; skipped: string[]; invalid: string[]; job: Job | null }>(
+      "/api/watchlist/add",
+      json("POST", { text, group }),
+    ),
+  deleteWatch: (symbol: string) =>
+    request<{ ok: boolean }>(`/api/watchlist/${encodeURIComponent(symbol)}`, { method: "DELETE" }),
+  klineWith: (symbol: string, days: number, strategy: string, params: Record<string, number>) =>
+    request<KlineResponse>(
+      `/api/kline/${encodeURIComponent(symbol)}?days=${days}&strategy=${strategy}&params=${encodeURIComponent(JSON.stringify(params))}`,
+    ),
+  simAccounts: () => request<SimAccountBrief[]>("/api/sim/accounts"),
+  createSimAccount: (name: string, initial_cash: number) =>
+    request<SimAccountBrief>("/api/sim/accounts", json("POST", { name, initial_cash })),
+  deleteSimAccount: (id: string) => request<{ ok: boolean }>(`/api/sim/accounts/${id}`, { method: "DELETE" }),
+  simState: (id: string) => request<SimState>(`/api/sim/accounts/${id}`),
+  addSlot: (id: string, body: { symbol: string; cash: number; strategy?: string | null; params?: Record<string, number> | null; entry_on_start: boolean }) =>
+    request<unknown>(`/api/sim/accounts/${id}/slots`, json("POST", body)),
+  stopSlot: (id: string, slotId: string) =>
+    request<{ ok: boolean }>(`/api/sim/accounts/${id}/slots/${slotId}/stop`, { method: "POST" }),
+  placeOrder: (id: string, body: { symbol: string; side: "BUY" | "SELL"; shares: number }) =>
+    request<unknown>(`/api/sim/accounts/${id}/orders`, json("POST", body)),
+  cancelOrder: (id: string, orderId: string) =>
+    request<{ ok: boolean }>(`/api/sim/accounts/${id}/orders/${orderId}`, { method: "DELETE" }),
 };

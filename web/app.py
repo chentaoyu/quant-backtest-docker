@@ -36,6 +36,8 @@ from data_loader import CACHE_DIR, DataError, available_symbols, has_tushare_tok
 from stock_list import load_stock_list  # noqa: E402
 import advisor  # noqa: E402
 import holdings  # noqa: E402
+import sim  # noqa: E402
+import watchlist  # noqa: E402
 from strategies import STRATEGIES  # noqa: E402
 
 # Web 端不把进度条刷到服务日志里（CLI 保留进度条）
@@ -92,6 +94,39 @@ class ImportRequest(BaseModel):
     text: str
     mode: str = "append"
     dry_run: bool = True
+
+
+class WatchItemRequest(BaseModel):
+    symbol: str
+    group: str | None = None
+    strategy: str | None = None
+    params: dict[str, float] | None = None
+    note: str = ""
+
+
+class WatchAddRequest(BaseModel):
+    text: str
+    group: str | None = None
+
+
+class AccountRequest(BaseModel):
+    name: str = "模拟账户"
+    initial_cash: float = 1_000_000
+    fees: dict[str, float] | None = None
+
+
+class SlotRequest(BaseModel):
+    symbol: str
+    cash: float = 100_000
+    strategy: str | None = None
+    params: dict[str, float] | None = None
+    entry_on_start: bool = False
+
+
+class OrderRequest(BaseModel):
+    symbol: str
+    side: str
+    shares: int
 
 
 class CheckupRequest(BaseModel):
@@ -257,6 +292,102 @@ def kline(symbol: str, days: int = 750, strategy: str | None = None, params: str
         return advisor.kline(symbol, max(60, min(days, 365 * 15)), strategy, parsed)
     except (holdings.HoldingError, BacktestError, DataError, ValueError) as exc:
         raise _bad_request(exc) from exc
+
+
+# ---------------------------------------------------------------- 自选股
+USER_ERRORS = (holdings.HoldingError, sim.SimError, BacktestError, DataError)
+
+
+@app.get("/api/watchlist")
+def watchlist_analysis() -> dict:
+    result = advisor.analyze_watchlist()
+    slots = sim.active_slots_by_symbol()
+    for row in result["rows"]:
+        row["sim"] = slots.get(row["symbol"], [])
+    return result
+
+
+@app.put("/api/watchlist")
+def watchlist_upsert(payload: WatchItemRequest) -> dict:
+    try:
+        item = watchlist.upsert(payload.model_dump())
+    except USER_ERRORS as exc:
+        raise _bad_request(exc) from exc
+    stale = advisor.stale_symbols()
+    return {"item": item, "job": advisor.jobs.start_checkup(stale) if stale else None}
+
+
+@app.post("/api/watchlist/add")
+def watchlist_add(payload: WatchAddRequest) -> dict:
+    try:
+        result = watchlist.add_many(payload.text, payload.group)
+    except USER_ERRORS as exc:
+        raise _bad_request(exc) from exc
+    stale = advisor.stale_symbols()
+    return {**result, "job": advisor.jobs.start_checkup(stale) if stale else None}
+
+
+@app.delete("/api/watchlist/{symbol}")
+def watchlist_delete(symbol: str) -> dict:
+    try:
+        watchlist.delete(symbol)
+    except USER_ERRORS as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------- 模拟仓
+def _sim_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except USER_ERRORS as exc:
+        raise _bad_request(exc) from exc
+
+
+@app.get("/api/sim/accounts")
+def sim_accounts() -> list[dict]:
+    return [{k: a[k] for k in ("id", "name", "initial_cash", "created_date")} for a in sim.list_accounts()]
+
+
+@app.post("/api/sim/accounts")
+def sim_create_account(payload: AccountRequest) -> dict:
+    return _sim_call(sim.create_account, payload.name, payload.initial_cash, payload.fees)
+
+
+@app.delete("/api/sim/accounts/{account_id}")
+def sim_delete_account(account_id: str) -> dict:
+    _sim_call(sim.delete_account, account_id)
+    return {"ok": True}
+
+
+@app.get("/api/sim/accounts/{account_id}")
+def sim_account(account_id: str) -> dict:
+    return _sim_call(sim.account_state, account_id)
+
+
+@app.post("/api/sim/accounts/{account_id}/slots")
+def sim_add_slot(account_id: str, payload: SlotRequest) -> dict:
+    if payload.strategy:
+        _sim_call(watchlist.check_params, payload.strategy, payload.params)
+    return _sim_call(sim.add_slot, account_id, payload.symbol, payload.cash, payload.strategy,
+                     payload.params, payload.entry_on_start)
+
+
+@app.post("/api/sim/accounts/{account_id}/slots/{slot_id}/stop")
+def sim_stop_slot(account_id: str, slot_id: str) -> dict:
+    _sim_call(sim.stop_slot, account_id, slot_id)
+    return {"ok": True}
+
+
+@app.post("/api/sim/accounts/{account_id}/orders")
+def sim_place_order(account_id: str, payload: OrderRequest) -> dict:
+    return _sim_call(sim.place_order, account_id, payload.symbol, payload.side, payload.shares)
+
+
+@app.delete("/api/sim/accounts/{account_id}/orders/{order_id}")
+def sim_cancel_order(account_id: str, order_id: str) -> dict:
+    _sim_call(sim.cancel_order, account_id, order_id)
+    return {"ok": True}
 
 
 @app.get("/reports/{folder}/{filename}", include_in_schema=False)

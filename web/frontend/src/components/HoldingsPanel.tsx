@@ -11,11 +11,9 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
-  Progress,
   Row,
   Select,
   Space,
-  Spin,
   Statistic,
   Table,
   Tag,
@@ -24,13 +22,14 @@ import {
 } from "antd";
 import { DownOutlined, ImportOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
 import { cnColor, money, pct, ratio, signed } from "../format";
 import type { Holding, HoldingAnalysis, HoldingsAnalysis, Job, Meta, Stock } from "../types";
 import HoldingDrawer, { triggerText } from "./HoldingDrawer";
 import HoldingImport, { downloadTemplate } from "./HoldingImport";
 import StockSelect from "./StockSelect";
+import { useCheckupJob } from "../hooks/useCheckupJob";
 
 interface Props {
   meta: Meta;
@@ -44,83 +43,34 @@ export default function HoldingsPanel({ meta, stocks, stocksLoading }: Props) {
   const { message } = AntApp.useApp();
   const [data, setData] = useState<HoldingsAnalysis | null>(null);
   const [loading, setLoading] = useState(true);
-  const [job, setJobState] = useState<Job | null>(null);
-  const [jobAt, setJobAt] = useState(0); // 收到 job 快照的本地时间，用于倒计时
-  const [now, setNow] = useState(Date.now());
   const [importOpen, setImportOpen] = useState(false);
   const [editing, setEditing] = useState<Holding | "new" | null>(null);
   const [detail, setDetail] = useState<HoldingAnalysis | null>(null);
   const [form] = Form.useForm<FormValues>();
 
-  const setJob = useCallback((next: Job | null) => {
-    setJobState(next);
-    setJobAt(Date.now());
-  }, []);
-
+  const setJobRef = useRef<(job: Job | null) => void>(() => undefined);
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const result = await api.analysis();
       setData(result);
-      if (result.job) setJob(result.job);
+      if (result.job) setJobRef.current(result.job);
       setDetail((current) => (current ? result.rows.find((r) => r.symbol === current.symbol) ?? null : null));
     } catch (error) {
       message.error((error as Error).message);
     } finally {
       setLoading(false);
     }
-  }, [message, setJob]);
+  }, [message]);
+  const checkupJob = useCheckupJob(load);
+  const { job, running, setJob } = checkupJob;
+  setJobRef.current = setJob;
 
   useEffect(() => {
     void load();
   }, [load]);
 
-  useEffect(() => {
-    if (job?.status !== "running") return;
-    const timer = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(timer);
-  }, [job?.status]);
-
-  /** 预估某只股票还要多少秒体检完；不在队列里返回 null */
-  const etaOf = (symbol: string): number | null => {
-    if (!job || job.status !== "running") return null;
-    const index = job.pending.indexOf(symbol);
-    if (index < 0) return null;
-    const elapsed = job.current ? job.current_elapsed + (now - jobAt) / 1000 : 0;
-    return Math.max(job.avg_sec - elapsed, 0) + index * job.avg_sec;
-  };
-
-  // 体检任务进行中时轮询进度，结束后刷新建议
-  useEffect(() => {
-    if (!job || job.status !== "running") return;
-    const timer = window.setInterval(() => {
-      api
-        .job(job.id)
-        .then((next) => {
-          const progressed = next.done !== job.done;
-          setJob(next);
-          if (progressed && next.status === "running") void load(); // 每体检完一只就刷新那一行
-          if (next.status === "done") {
-            const failed = Object.keys(next.errors).length;
-            if (failed) message.warning(`体检完成，${failed} 只失败：${Object.entries(next.errors).map(([k, v]) => `${k} ${v}`).join("；")}`);
-            else message.success("策略体检完成");
-            void load();
-          }
-        })
-        .catch(() => undefined);
-    }, 2000);
-    return () => window.clearInterval(timer);
-  }, [job, load, message, setJob]);
-
-  const startCheckup = async (force: boolean, symbols?: string[]) => {
-    try {
-      const result = await api.checkup(force, symbols);
-      if (result.job) setJob(result.job);
-      else message.info(result.message ?? "无需体检");
-    } catch (error) {
-      message.error((error as Error).message);
-    }
-  };
+  const startCheckup = checkupJob.start;
 
   const openEdit = (holding: Holding | "new") => {
     setEditing(holding);
@@ -154,7 +104,6 @@ export default function HoldingsPanel({ meta, stocks, stocksLoading }: Props) {
 
   const summary = data?.summary;
   const rows = data?.rows ?? [];
-  const running = job?.status === "running";
 
   const toolbar = (
     <Space wrap>
@@ -189,16 +138,7 @@ export default function HoldingsPanel({ meta, stocks, stocksLoading }: Props) {
             </Col>
           )}
         </Row>
-        {running && job && (
-          <div style={{ marginTop: 12 }}>
-            <Typography.Text type="secondary">
-              策略体检中 {job.done}/{job.total}
-              {job.current ? ` · ${rows.find((r) => r.symbol === job.current)?.name ?? job.current}` : ""}
-              ，预计还需 {Math.ceil(etaOf(job.pending[job.pending.length - 1]) ?? 0)} 秒
-            </Typography.Text>
-            <Progress percent={Math.round((job.done / Math.max(job.total, 1)) * 100)} size="small" />
-          </div>
-        )}
+        {checkupJob.progressBar((symbol) => rows.find((r) => r.symbol === symbol)?.name ?? symbol)}
         {summary && summary.count > 0 && (
           <Row gutter={[16, 16]} style={{ marginTop: 16 }}>
             <Col xs={12} md={5}>
@@ -303,18 +243,8 @@ export default function HoldingsPanel({ meta, stocks, stocksLoading }: Props) {
                 title: "今日建议",
                 width: 150,
                 render: (_, r) => {
-                  const eta = etaOf(r.symbol);
-                  if (eta !== null) {
-                    return (
-                      <Space size={6}>
-                        <Spin size="small" />
-                        <span style={{ fontSize: 12.5, color: "#475569" }}>
-                          {job?.current === r.symbol ? "体检中" : "排队中"}
-                          {eta >= 1 ? ` · 约 ${Math.ceil(eta)} 秒` : " · 即将完成"}
-                        </span>
-                      </Space>
-                    );
-                  }
+                  const checking = checkupJob.rowStatus(r.symbol);
+                  if (checking) return checking;
                   return r.error ? (
                     <Tooltip title={r.error}>
                       <Tag color="error">分析失败</Tag>

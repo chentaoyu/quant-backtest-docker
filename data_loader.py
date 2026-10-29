@@ -408,3 +408,37 @@ def available_symbols() -> list[dict]:
                 adjust=adjust,
             )
     return sorted(found.values(), key=lambda x: x["symbol"])
+
+
+def load_index(code: str = "000300") -> pd.DataFrame:
+    """指数日线（akshare，不复权），用作模拟仓基准；新鲜度规则同个股。"""
+    cache = CACHE_DIR / f"index_{code}.csv"
+    now = datetime.now()
+    with _cache_lock(cache):
+        if cache.exists():
+            df = pd.read_csv(cache, index_col=0, parse_dates=True)
+            meta = _read_meta(cache)
+            try:
+                fetched_at = datetime.fromisoformat(meta["fetched_at"])
+            except (KeyError, TypeError, ValueError):
+                fetched_at = datetime.min
+            session = last_session_close(now)
+            complete = df.index[-1].date() >= session.date()
+            if fetched_at >= session and (complete or now - fetched_at < RETRY_MISSING):
+                return df
+        try:
+            import akshare as ak
+
+            raw = ak.stock_zh_index_daily(symbol=("sh" if code.startswith("000") else "sz") + code)
+            raw = raw.rename(columns={"date": "Date", "open": "Open", "high": "High", "low": "Low",
+                                      "close": "Close", "volume": "Volume"})
+            raw["Date"] = pd.to_datetime(raw["Date"])
+            df = _clean(raw.set_index("Date")[COLUMNS], f"指数 {code}")
+        except Exception as exc:  # noqa: BLE001 - 网络失败时用旧缓存
+            if cache.exists():
+                return pd.read_csv(cache, index_col=0, parse_dates=True)
+            raise DataError(f"指数 {code} 获取失败：{exc}") from exc
+        _write_cache(df, cache, {"symbol": code, "source": "akshare", "start": df.index[0].strftime("%Y%m%d"),
+                                 "fetched_at": now.isoformat(timespec="seconds")})
+        return df
+

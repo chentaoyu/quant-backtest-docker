@@ -29,10 +29,12 @@ from backtest_engine import (
 )
 from data_loader import CACHE_DIR, last_session_close, load_daily
 from holdings import list_holdings
+import watchlist
 from signals import latest_signal, trigger_prices
 from strategies import STRATEGIES
 
 CHECKUP_FILE = CACHE_DIR / "checkups.json"
+_ANALYSIS_CACHE: dict[str, tuple[str, dict]] = {}
 CHECKUP_YEARS = 5
 TRAIN_YEARS = 3
 TEST_YEARS = 1
@@ -232,12 +234,14 @@ jobs = Jobs()
 
 
 def stale_symbols(force: bool = False) -> list[str]:
+    """持仓 + 自选里需要（重新）体检的股票。"""
     checkups = load_checkups()
+    symbols = dict.fromkeys([h["symbol"] for h in list_holdings()] + [w["symbol"] for w in watchlist.list_items()])
     result = []
-    for h in list_holdings():
-        c = checkups.get(h["symbol"])
+    for symbol in symbols:
+        c = checkups.get(symbol)
         if force or not c or datetime.now() - datetime.fromisoformat(c["checked_at"]) > CHECKUP_MAX_AGE:
-            result.append(h["symbol"])
+            result.append(symbol)
     return result
 
 
@@ -245,6 +249,29 @@ def stale_symbols(force: bool = False) -> list[str]:
 def _strategy_params(name: str, check: dict | None) -> dict:
     live = ((check or {}).get("strategies", {}).get(name) or {}).get("live_params")
     return live or _default_params(STRATEGIES[name])
+
+
+def resolve_strategy(strategy: str | None, params: dict | None, check: dict | None) -> tuple[str | None, dict | None, str]:
+    """返回 (策略名, 参数, 来源)；来源：auto 体检主策略 / checkup 体检参数 / default 默认参数 / manual 手动。"""
+    name = strategy or (check or {}).get("best")
+    if not name:
+        return None, None, "none"
+    if params:
+        return name, params, "manual"
+    live = ((check or {}).get("strategies", {}).get(name) or {}).get("live_params")
+    source = "auto" if not strategy else ("checkup" if live else "default")
+    return name, live or _default_params(STRATEGIES[name]), source
+
+
+def _cached(kind: str, symbol: str, key: object, compute):
+    """同一交易日内、输入不变时复用分析结果。"""
+    full_key = json.dumps([key, last_session_close(datetime.now()).isoformat()], sort_keys=True, default=str)
+    hit = _ANALYSIS_CACHE.get(f"{kind}:{symbol}")
+    if hit and hit[0] == full_key:
+        return hit[1]
+    result = compute()
+    _ANALYSIS_CACHE[f"{kind}:{symbol}"] = (full_key, result)
+    return result
 
 
 def _since_buy(df: pd.DataFrame, buy_date: str, trades: list[dict]) -> dict | None:
@@ -342,26 +369,16 @@ def analyze_holding(holding: dict, check: dict | None) -> dict:
     }
 
 
-_ANALYSIS_CACHE: dict[str, tuple[str, dict]] = {}
-
-
 def analyze_all() -> dict:
     holdings = list_holdings()
     checkups = load_checkups()
 
     def one(h: dict) -> dict:
         check = checkups.get(h["symbol"])
-        key = json.dumps([h, check and check["checked_at"]], sort_keys=True)
-        cached = _ANALYSIS_CACHE.get(h["symbol"])
-        session = last_session_close(datetime.now()).isoformat()
-        if cached and cached[0] == key + session:
-            return cached[1]
         try:
-            result = analyze_holding(h, check)
+            return _cached("holding", h["symbol"], [h, check and check["checked_at"]], lambda: analyze_holding(h, check))
         except Exception as exc:  # noqa: BLE001 - 单只失败照样展示
             return {**h, "error": str(exc), "advice": None}
-        _ANALYSIS_CACHE[h["symbol"]] = (key + session, result)
-        return result
 
     with ThreadPoolExecutor(max_workers=4) as pool:
         rows = list(pool.map(one, holdings))
@@ -386,6 +403,69 @@ def analyze_all() -> dict:
             "data_date": max((r["data_date"] for r in ok), default=None),
         },
         "rows": rows,
+        "job": jobs.running(),
+    }
+
+
+# ---------------------------------------------------------------- 自选股
+def _last_event(trades: list[dict]) -> dict | None:
+    events = [(t["entry_date"], "BUY", t["entry_price"]) for t in trades]
+    events += [(t["exit_date"], "SELL", t["exit_price"]) for t in trades if t["exit_date"]]
+    if not events:
+        return None
+    date, action, price = max(events)
+    return {"date": date, "action": action, "price": price}
+
+
+def analyze_watch_item(item: dict, check: dict | None) -> dict:
+    symbol = item["symbol"]
+    df = load_daily(symbol, start=_years_ago(SIGNAL_YEARS))
+    close, prev = float(df["Close"].iloc[-1]), float(df["Close"].iloc[-2])
+    name, params, source = resolve_strategy(item.get("strategy"), item.get("params"), check)
+    sharpes = {k: (v or {}).get("oos_sharpe") for k, v in (check or {}).get("strategies", {}).items()}
+    signal = None
+    if name:
+        cls = STRATEGIES[name]
+        sig = latest_signal(df, cls, params)
+        signal = {
+            **{k: sig[k] for k in ("action", "hold", "hold_after", "since")},
+            "triggers": trigger_prices(df, symbol, cls, params, sig["hold_after"]),
+            "last_event": _last_event(sig["trades"]),
+        }
+    return {
+        **item,
+        "data_date": df.index[-1].date().isoformat(),
+        "close": round(close, 3),
+        "change_pct": _finite((close / prev - 1) * 100, 2),
+        "used": None if not name else {
+            "name": name, "label": STRATEGIES[name].label, "params": params, "source": source,
+            "oos_sharpe": sharpes.get(name),
+        },
+        "signal": signal,
+        "sharpes": sharpes,
+        "checkup": None if check is None else {"checked_at": check["checked_at"], "best": check["best"]},
+        "error": None,
+    }
+
+
+def analyze_watchlist() -> dict:
+    items = watchlist.list_items()
+    checkups = load_checkups()
+
+    def one(item: dict) -> dict:
+        check = checkups.get(item["symbol"])
+        try:
+            return _cached("watch", item["symbol"], [item, check and check["checked_at"]],
+                           lambda: analyze_watch_item(item, check))
+        except Exception as exc:  # noqa: BLE001
+            return {**item, "error": str(exc), "signal": None, "used": None}
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        rows = list(pool.map(one, items))
+    return {
+        "rows": rows,
+        "groups": sorted({r["group"] for r in rows}),
+        "signal_count": sum(1 for r in rows if (r.get("signal") or {}).get("action")),
         "job": jobs.running(),
     }
 
