@@ -109,7 +109,7 @@ docker compose restart web
 | `PYTHON_IMAGE` | `python:3.13-slim-bookworm` | 运行基础镜像，可换镜像源 |
 | `NPM_REGISTRY` | `https://registry.npmjs.org` | 构建前端时的 npm 源，国内可换 npmmirror |
 | `PIP_INDEX_URL` | `https://pypi.org/simple` | 构建镜像时的 pip 源，国内可换清华源 |
-| `UPDATE_TOKEN` | 自动生成 | 在线更新令牌（deploy-ecs.sh 生成；页面首次更新时输入一次） |
+| `UPDATE_TOKEN` | 自动生成 | 在线更新令牌；**留空 = 免鉴权**（仅本地用）。ECS 由 deploy-ecs.sh 生成 |
 | `UPDATE_MODE` | `none` | `host-updater` = 启用宿主机在线更新服务；本地开发保持 `none` |
 | `IMAGE_TAG` | `latest` | 使用的 GHCR 镜像 tag（在线更新器会自动改写） |
 | `GITHUB_TOKEN` | 空 | 可选：GitHub API 令牌，提高版本检测限额（匿名 60 次/小时，一般够用） |
@@ -218,14 +218,14 @@ Mac 没有 systemd，默认走「本地开发模式」（页面只显示手动�
 ./scripts/local-update-setup.sh
 ```
 
-它会把令牌/模式写进 `.env`、固化当前镜像 tag，并安装 launchd WatchPaths 代理（macOS 版的 systemd path unit）监听 `update-channel/`。之后：GitHub 打新 tag → 页面红点 → 点击更新，和 ECS 行为一致。
+它会把模式写进 `.env`、固化当前镜像 tag，并安装 launchd WatchPaths 代理（macOS 版的 systemd path unit）监听 `update-channel/`。之后：GitHub 打新 tag → 页面红点 → 点击更新，和 ECS 行为一致。本地默认免令牌（`UPDATE_TOKEN` 留空），点击即更新。
 
 注意：更新器会 `git reset --hard` 到目标 tag，本地有未提交改动时会**自动中止**而不是吞掉它们——先 commit 或 stash 再点更新；更新后仓库处于 detached HEAD（对齐镜像版本），继续开发前 `git checkout main`。
 
 ### 说明
 
 - **数据安全**：`quant_data` / `quant_reports` 命名卷不受更新影响。
-- **更新令牌**：`.env` 的 `UPDATE_TOKEN`（deploy-ecs.sh 自动生成），前端首次使用输入一次即记住；这是唯一需要鉴权的接口。
+- **更新令牌**：`.env` 的 `UPDATE_TOKEN`——它保护的不是公开的仓库/镜像，而是"重启你的服务"这个动作（全应用唯一有破坏性的接口）。**留空 = 免鉴权**，适合端口只有自己能访问的本地部署；ECS 等对外可达的部署请保留（deploy-ecs.sh 自动生成），前端首次使用输入一次即记住。
 - **回滚**：页面一键回滚到最近一次成功版本（本地旧镜像还在，秒级）；新版本启动失败也会自动回滚。
 - **对齐保证**：镜像与 compose/脚本来自同一个 git tag，host-update.sh 更新时会 `git reset` 到目标 tag。
 - **任务中断**：更新会重启容器，正在运行的回测/体检任务会被中断，触发前页面有提示。

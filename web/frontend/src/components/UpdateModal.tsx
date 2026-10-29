@@ -149,7 +149,7 @@ export default function UpdateModal({ open, onClose }: Props) {
 
   const trigger = async () => {
     const token = localStorage.getItem(TOKEN_KEY) ?? "";
-    if (!token) {
+    if (!token && info?.token_required !== false) {
       setNeedToken(true);
       return;
     }
@@ -178,7 +178,7 @@ export default function UpdateModal({ open, onClose }: Props) {
 
   const rollback = async () => {
     const token = localStorage.getItem(TOKEN_KEY) ?? "";
-    if (!token) {
+    if (!token && info?.token_required !== false) {
       setNeedToken(true);
       return;
     }

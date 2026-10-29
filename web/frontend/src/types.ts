@@ -28,6 +28,7 @@ export interface VersionInfo {
   latest: LatestRelease | null;
   has_update: boolean | null;
   update_mode: string; // none | host-updater
+  token_required: boolean; // 服务器是否要求更新令牌（UPDATE_TOKEN 留空 = false）
   warning: string | null;
   last_update: LastUpdateSummary | null;
 }

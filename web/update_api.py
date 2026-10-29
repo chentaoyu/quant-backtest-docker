@@ -153,8 +153,14 @@ def _status_summary() -> dict[str, Any] | None:
 
 # ---------------------------------------------------------------- 校验
 def _require_token(provided: str | None) -> None:
+    """UPDATE_TOKEN 留空 = 免鉴权模式（仅建议本地 localhost 使用）。
+
+    这是对"重启服务/切换版本"这类破坏性操作的唯一防线：
+    - 本地单机部署（端口只有自己能访问）可以留空，点击即更新；
+    - 端口对外可达的部署（ECS 等）应设置令牌，防止任何人触发停机/回退。
+    """
     if not UPDATE_TOKEN:
-        raise HTTPException(500, "服务器未配置 UPDATE_TOKEN，无法在线更新")
+        return  # 免鉴权模式
     if not provided or not secrets.compare_digest(provided, UPDATE_TOKEN):
         raise HTTPException(401, "更新令牌不正确")
 
@@ -212,6 +218,7 @@ def get_version() -> dict:
         "latest": latest,
         "has_update": has_update,
         "update_mode": UPDATE_MODE,
+        "token_required": bool(UPDATE_TOKEN),
         "warning": warning,
         "last_update": _status_summary(),
     }

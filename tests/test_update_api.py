@@ -84,6 +84,13 @@ def test_trigger_update_requires_token():
     assert exc.value.status_code == 401
 
 
+def test_no_auth_mode_when_token_empty(monkeypatch):
+    """UPDATE_TOKEN 留空 = 免鉴权：无头/错头都放行（仅建议本地使用）。"""
+    monkeypatch.setattr(upd, "UPDATE_TOKEN", "")
+    result = upd.trigger_update(None, None)
+    assert result["triggered"] is True
+
+
 def test_trigger_update_requires_updater_mode(monkeypatch):
     monkeypatch.setattr(upd, "UPDATE_MODE", "none")
     with pytest.raises(HTTPException) as exc:

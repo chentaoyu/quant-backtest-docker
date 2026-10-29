@@ -43,10 +43,10 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
-const updateHeaders = (token: string): RequestInit["headers"] => ({
-  "Content-Type": "application/json",
-  "X-Update-Token": token,
-});
+const updateHeaders = (token: string): RequestInit["headers"] =>
+  token
+    ? { "Content-Type": "application/json", "X-Update-Token": token }
+    : { "Content-Type": "application/json" };
 
 export const api = {
   meta: () => request<Meta>("/api/meta"),
