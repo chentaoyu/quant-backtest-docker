@@ -1,8 +1,8 @@
 # quant-backtest-docker
 
-A 股日线策略回测平台的 **Docker 一键部署版**：FastAPI + React/antd + backtesting.py，支持参数优化、样本外切分，以及持仓的策略体检和每日买卖建议。
+A 股日线策略回测平台的 **Docker 一键部署版**：FastAPI + React/antd + backtesting.py，支持参数优化、样本外切分，持仓的策略体检和每日买卖建议，以及**页面一键在线更新**（CI 构建镜像 → GHCR → 服务器拉取替换，支持回滚）。
 
-这是从 `quant-backtest` 复制出来的独立项目，原项目不会被覆盖；本次同时修复了 `QUANT_DATA_SOURCE=auto` 的解析 bug。
+这是从 `quant-backtest` 复制出来的独立项目，原项目不会被覆盖。
 
 ## 一键启动
 
@@ -60,12 +60,12 @@ docker compose up -d --build
 
 ```bash
 # 旧机器导出（文件属主是当前用户，不需要 sudo）
-docker run --rm -v quant-backtest_quant_data:/data quant-backtest:local \
+docker run --rm -v quant-backtest_quant_data:/data ghcr.io/chentaoyu/quant-backtest-docker:latest \
   tar czf - -C /data . > quant_data.tgz
 scp quant_data.tgz user@ecs:/opt/quant-backtest/
 
 # 新机器导入：先执行一次 deploy 让卷创建出来，再解包
-docker run --rm -i -v quant-backtest_quant_data:/data quant-backtest:local \
+docker run --rm -i -v quant-backtest_quant_data:/data ghcr.io/chentaoyu/quant-backtest-docker:latest \
   tar xzf - -C /data < quant_data.tgz
 docker compose restart web
 ```
@@ -112,6 +112,7 @@ docker compose restart web
 | `UPDATE_TOKEN` | 自动生成 | 在线更新令牌（deploy-ecs.sh 生成；页面首次更新时输入一次） |
 | `UPDATE_MODE` | `none` | `host-updater` = 启用宿主机在线更新服务；本地开发保持 `none` |
 | `IMAGE_TAG` | `latest` | 使用的 GHCR 镜像 tag（在线更新器会自动改写） |
+| `GITHUB_TOKEN` | 空 | 可选：GitHub API 令牌，提高版本检测限额（匿名 60 次/小时，一般够用） |
 
 不填 token 也能启动，但首次拉取股票列表和行情会更慢，且 akshare 接口偶尔不稳定。
 
@@ -131,13 +132,21 @@ docker compose restart web
 │                                         │
 │  /app/data      ← quant_data 命名卷       │
 │  /app/reports   ← quant_reports 命名卷    │
+│  /app/update-channel ← bind mount        │
+└──────────────────┬──────────────────────┘
+                   │ 写更新请求 / 读状态、日志
+                   ▼
+┌─────────────────────────────────────────┐
+│ 宿主机 systemd updater（quant-updater）  │
+│  git 同步 → 改 IMAGE_TAG → compose pull  │
+│  → up -d 替换容器（不健康自动回滚）        │
 └─────────────────────────────────────────┘
-        ▲
-        │ 多阶段构建
-┌───────┴──────────┐
-│ Node 22 + pnpm   │  React/antd → web/static
-│ Python 3.13      │  pip install → 运行依赖
-└──────────────────┘
+
+镜像来源（本地与 CI 共用同一份多阶段 Dockerfile：
+Node 22 + pnpm 构建前端 → Python 3.13 运行）：
+· 打 v* tag 触发 GitHub Actions → ghcr.io/chentaoyu/quant-backtest-docker:{版本,latest}
+· push main → 同上 :main、:sha-<短hash>
+· 本地 docker compose build → 打同名 tag
 ```
 
 设计取舍：
@@ -147,6 +156,7 @@ docker compose restart web
 - **非 root 运行**：容器内使用 `app` 用户；数据和报告写入命名卷。
 - **数据和报告持久化**：`docker compose down` 不会删数据；`down -v` 才会删除卷。
 - **单 worker**：回测执行有进程内锁，默认一个 uvicorn worker，避免同一批次并发写报告。
+- **在线更新零侵入容器**：容器保持非 root、不挂 docker.sock、不含 git；更新由宿主机 systemd 服务执行，通过 bind mount 的 `update-channel` 目录交换请求与状态。
 
 ## 常用命令
 
@@ -160,8 +170,11 @@ docker compose logs -f web
 # 停止（保留数据）
 docker compose down
 
-# 重新构建并启动
+# 重新构建并启动（本地改动后）
 docker compose up -d --build
+
+# 更新到最新发布版（页面右上角徽章也可一键更新）
+git pull && docker compose pull web && docker compose up -d
 
 # 删除容器 + 数据卷（会清空行情缓存和报告）
 docker compose down -v
@@ -177,7 +190,7 @@ curl http://127.0.0.1:8000/api/health
 ### 前提（一次性设置）
 
 1. **发版打 tag**：`git tag v0.3.0 && git push origin v0.3.0` → GitHub Actions 自动构建多架构镜像（amd64/arm64）推到 GHCR（`ghcr.io/chentaoyu/quant-backtest-docker:v0.3.0` 与 `:latest`），并创建 GitHub Release。之后每次发版同样打 tag。
-2. **GHCR 包设为 public**：首次 CI 推送后，在 GitHub 仓库页右侧 Packages → 镜像 → Package settings → Change visibility → Public（ECS 匿名拉取才不需要凭证）。
+2. **GHCR 包设为 public**：首次 CI 推送后，打开[包设置页](https://github.com/users/chentaoyu/packages/container/quant-backtest-docker/settings) → Danger Zone → Change visibility → Public（ECS 匿名拉取才不需要凭证；保持 private 则需在服务器上用 PAT 执行 `docker login ghcr.io`）。
 3. **ECS 装好 updater**：`./scripts/deploy-ecs.sh` 自动完成（生成 UPDATE_TOKEN、安装 systemd path unit）。
 
 ### 更新流程
@@ -223,10 +236,10 @@ docker compose cp web:/app/reports/. ./export/reports/
 
 ## 开发模式
 
-只构建 Docker 镜像：
+只构建 Docker 镜像（与 CI 同名，构建完可直接 `docker compose up -d`）：
 
 ```bash
-docker build -t quant-backtest:local .
+docker compose build web
 ```
 
 本地不用 Docker 时：
@@ -248,7 +261,7 @@ cd ../..
 ```text
 Dockerfile             多阶段构建（Node 前端 + Python 运行时）
 docker-compose.yml     端口、环境变量、命名卷、健康检查
-.dockerignore          排除 .env/data/reports/node_modules
+.dockerignore          排除 .env/data/reports/update-channel 等
 scripts/docker-up.sh   本地一键启动脚本
 scripts/deploy-ecs.sh  新机器/ECS 一键部署（Docker 检查 + 构建 + 健康检查）
 scripts/host-update.sh 宿主机在线更新执行器（git 同步 + compose pull + up）
@@ -307,6 +320,21 @@ docker compose up -d --build
 ```bash
 docker compose build --no-cache web
 ```
+
+### 在线更新失败 / 页面提示更新卡住
+
+看宿主机更新器的执行日志：
+
+```bash
+journalctl -u quant-updater.service -f     # systemd 触发与服务日志
+tail -100 update-channel/update.log        # git/pull/up 的完整输出
+```
+
+常见原因：GHCR 包还是 private（拉取 401/404，见「在线版本更新」的前提 2）、服务器到 ghcr.io 不通。**更新失败不影响正在运行的服务**（拉取失败即止，容器不动）；新版本起不来会自动回滚到上一版本。手动回滚：改 `.env` 的 `IMAGE_TAG` 为上一版本后执行 `docker compose pull web && docker compose up -d`。
+
+### 页面版本显示 dev 或 main-xxxxx
+
+正常现象：`dev` 是本地 `docker compose build` 的镜像（未传版本 build args）；`main-xxxxx` 是 main 分支的 CI 构建。只有 `vX.Y.Z`（tag 构建）会参与「是否最新」的判断，第一次在线更新到正式版后就统一了。
 
 ### 报告在宿主机看不到
 
