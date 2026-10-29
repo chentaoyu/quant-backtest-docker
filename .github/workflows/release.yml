@@ -33,9 +33,15 @@ jobs:
             VERSION="main-$SHORT"
             TAGS="${{ env.IMAGE }}:main,${{ env.IMAGE }}:sha-$SHORT"
           fi
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then
+            TEST_TAG="$GITHUB_REF_NAME"
+          else
+            TEST_TAG="sha-$SHORT"
+          fi
           {
             echo "version=$VERSION"
             echo "commit=$COMMIT"
+            echo "test_tag=$TEST_TAG"
             echo "tags<<EOF"
             echo "$TAGS"
             echo "EOF"
@@ -61,6 +67,12 @@ jobs:
             APP_COMMIT=${{ steps.vars.outputs.commit }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: 冒烟测试：镜像内应用可导入
+        run: |
+          docker pull "${{ env.IMAGE }}:${{ steps.vars.outputs.test_tag }}"
+          docker run --rm --entrypoint python "${{ env.IMAGE }}:${{ steps.vars.outputs.test_tag }}" \
+            -c "from web.app import app; print('smoke OK:', app.title)"
 
       - name: 创建 GitHub Release（仅 tag）
         if: startsWith(github.ref, 'refs/tags/v')

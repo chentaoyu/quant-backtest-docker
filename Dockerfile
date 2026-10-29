@@ -55,7 +55,7 @@ RUN PIP_INDEX_URL="${PIP_INDEX_URL}" pip install --upgrade pip \
 # 应用代码。
 COPY backtest_engine.py data_loader.py stock_list.py run_backtest.py signals.py holdings.py advisor.py watchlist.py sim.py ./
 COPY strategies ./strategies
-COPY web/__init__.py web/app.py ./web/
+COPY web/__init__.py web/app.py web/update_api.py ./web/
 COPY --from=frontend /src/web/static ./web/static
 
 # 非 root 运行；data/reports 会挂载到命名卷。
