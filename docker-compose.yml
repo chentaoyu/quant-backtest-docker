@@ -25,6 +25,7 @@ services:
       UPDATE_MODE: "${UPDATE_MODE:-none}"
       UPDATE_TOKEN: "${UPDATE_TOKEN:-}"
       GITHUB_TOKEN: "${GITHUB_TOKEN:-}"
+      AGENT_URL: http://agent:8100
     volumes:
       - quant_data:/app/data
       - quant_reports:/app/reports
@@ -43,6 +44,52 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # 量化 Agent：同一镜像，工具经 web API 读写业务数据；LLM 跑在宿主机 Ollama（容器内用不到 Metal GPU）
+  agent:
+    image: ghcr.io/chentaoyu/quant-backtest-docker:${IMAGE_TAG:-latest}
+    pull_policy: never # 镜像由 web 服务构建/拉取，避免 compose 抢先去拉
+    init: true
+    command: ["python", "-m", "uvicorn", "agent.server:app", "--host", "0.0.0.0", "--port", "8100"]
+    ports:
+      - "127.0.0.1:${AGENT_PORT:-8100}:8100"
+    environment:
+      TZ: Asia/Shanghai
+      WEB_URL: http://web:8000
+      TUSHARE_TOKEN: "${TUSHARE_TOKEN:-}"
+      LLM_BASE_URL: "${LLM_BASE_URL:-http://host.docker.internal:11434/v1}"
+      LLM_API_KEY: "${LLM_API_KEY:-ollama}"
+      LLM_MAIN: "${LLM_MAIN:-qwen3.5:35b-a3b-nvfp4}"
+      LLM_FAST: "${LLM_FAST:-qwen3.5:4b}"
+      LLM_REASONING: "${LLM_REASONING:-none}"
+      MONITOR_ENABLED: "${MONITOR_ENABLED:-1}"
+      MONITOR_INTERVAL: "${MONITOR_INTERVAL:-60}"
+      MONITOR_LLM_NOTE: "${MONITOR_LLM_NOTE:-1}"
+    volumes:
+      - quant_data:/app/data # 告警库 data/agent/monitor.db（agent 独占写）
+    extra_hosts:
+      - "host.docker.internal:host-gateway" # Linux 下也能访问宿主机 Ollama
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8100/api/health', timeout=3)",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     logging:
       driver: json-file
       options:

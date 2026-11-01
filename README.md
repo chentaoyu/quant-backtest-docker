@@ -96,6 +96,37 @@ docker compose restart web
 
 数据文件：`data/watchlist.json`、`data/sim_accounts.json`。
 
+## 量化 Agent（本地大模型）
+
+`agent` 服务（端口 `8100`，只绑定 127.0.0.1）用本地大模型 + 工具调用回答持仓、自选、回测、体检、行情相关问题。工具经 web API 取数据，市场复盘与实时报价走 Tushare。
+
+前置：宿主机装 Ollama 并拉取模型（Mac 上 Ollama 必须跑在宿主机才能用 GPU）：
+
+```bash
+brew install ollama && brew services start ollama
+ollama pull qwen3.5:35b-a3b-nvfp4   # 主模型，MoE，M4 Max 约 100 tok/s
+ollama pull qwen3.5:4b              # 快模型
+```
+
+使用：
+
+```bash
+curl -s localhost:8100/api/agent/status          # 检查模型 / web 连通
+curl -s localhost:8100/api/agent/chat -H 'Content-Type: application/json' \
+  -d '{"message":"我的持仓今天怎么样"}'
+uv run python -m agent "用 macd 回测 600519，20240101 切分"   # 本地命令行（需 web 已启动）
+```
+
+### 盯盘（监控 Agent）
+
+页面「盯盘」页签：市场快照（指数 / 涨跌家数与涨跌停 / 领涨领跌行业）+ 告警列表；告警通过 SSE 实时推送，任意页面右下角弹通知。
+
+- 交易时段（交易日 9:30–11:30、13:00–15:00）每 `MONITOR_INTERVAL` 秒检查持仓 + 自选：涨跌停、大涨大跌（按涨跌停幅度的 50%/80% 分级）、跌破/收复成本价、止损止盈线、按现价收盘将触发策略买卖信号；以及指数大跌、普跌、跌停潮。
+- 级别（提示 / 注意 / 告警）只由规则决定；同一股票同一规则每天只报一次，升级才再报。注意及以上的个股告警由主模型补一句解读（`MONITOR_LLM_NOTE=0` 关闭）。
+- 「立即检查」不受交易时段限制，盘后也能按收盘价跑一轮。告警存 `data/agent/monitor.db`。
+
+`chat` 参数：`model`（`main` / `fast` / 具体模型名）、`reasoning`（`none` / `low` / `medium` / `high`）、`history`（多轮对话）。换模型或改用云端 OpenAI 兼容接口只需改 `LLM_*` 环境变量。模型速度对比：`python3 scripts/llm_bench.py 模型A 模型B`。
+
 ## 环境变量
 
 `.env` 由 Compose 自动读取：
@@ -113,6 +144,12 @@ docker compose restart web
 | `UPDATE_MODE` | `none` | `host-updater` = 启用宿主机在线更新服务；本地开发保持 `none` |
 | `IMAGE_TAG` | `latest` | 使用的 GHCR 镜像 tag（在线更新器会自动改写） |
 | `GITHUB_TOKEN` | 空 | 可选：GitHub API 令牌，提高版本检测限额（匿名 60 次/小时，一般够用） |
+| `LLM_BASE_URL` | `http://host.docker.internal:11434/v1` | Agent 用的 OpenAI 兼容接口（默认宿主机 Ollama） |
+| `LLM_MAIN` / `LLM_FAST` | `qwen3.5:35b-a3b-nvfp4` / `qwen3.5:4b` | 主模型 / 快模型 |
+| `LLM_REASONING` | `none` | 思考模式：`none` 最快；`low`/`medium`/`high` 推理更充分 |
+| `AGENT_PORT` | `8100` | Agent 服务宿主机端口 |
+| `MONITOR_ENABLED` / `MONITOR_INTERVAL` | `1` / `60` | 盯盘开关 / 检查间隔（秒） |
+| `MONITOR_LLM_NOTE` | `1` | 告警是否由大模型补一句解读 |
 
 不填 token 也能启动，但首次拉取股票列表和行情会更慢，且 akshare 接口偶尔不稳定。
 
@@ -291,6 +328,11 @@ strategies/            六个只做多策略
 web/app.py             FastAPI 入口
 web/update_api.py      在线更新 API（版本检测 / 触发 / 状态 / 回滚）
 web/frontend/          React + antd + ECharts 源码
+agent/llm.py           LLM 网关（OpenAI 兼容）+ 工具调用循环
+agent/tools.py         Agent 工具（持仓/自选/回测/体检/行情/市场复盘）
+agent/server.py        Agent HTTP 服务（/api/agent/chat、盯盘接口）
+agent/monitor/         盯盘：盘中行情 market / 规则引擎 rules / 告警库 store / 调度 runner
+scripts/llm_bench.py   本地模型速度与工具调用质量对比
 .github/workflows/release.yml  CI：构建镜像推 GHCR + 创建 Release
 ```
 

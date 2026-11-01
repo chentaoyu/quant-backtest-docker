@@ -526,3 +526,68 @@ export interface SimState {
   trades: SimTrade[];
   scorecard: SimScore[];
 }
+
+// ---------------------------------------------------------------- 盯盘（agent 服务）
+export type AlertLevel = "info" | "warn" | "alert";
+
+export interface MonitorAlert {
+  id: number;
+  ts: string;
+  day: string;
+  rule: string;
+  level: AlertLevel;
+  symbol: string | null;
+  name: string | null;
+  title: string;
+  message: string | null;
+  note: string | null;
+  data: Record<string, unknown>;
+}
+
+export interface LiveIndex {
+  code: string;
+  name: string;
+  price: number;
+  change_pct: number | null;
+  time: string;
+}
+
+export interface LiveBreadth {
+  date: string;
+  up: number;
+  down: number;
+  flat: number;
+  limit_up: number;
+  limit_down: number;
+  up_over_5pct: number;
+  down_over_5pct: number;
+  down_ratio: number | null;
+}
+
+export interface LiveSector {
+  name: string;
+  count: number;
+  change_pct: number;
+  leader: string;
+  leader_change_pct: number;
+}
+
+export interface LiveMarket {
+  at: string;
+  errors: Record<string, string>;
+  indexes: LiveIndex[] | null;
+  breadth: LiveBreadth | null;
+  sectors: { top: LiveSector[]; bottom: LiveSector[] } | null;
+}
+
+export interface MonitorStatus {
+  enabled: boolean;
+  interval: number;
+  last_tick: string | null;
+  last_error: string | null;
+  last_new: number;
+  ticks: number;
+  trading: boolean;
+  watch_count: number;
+  holdings: number;
+}

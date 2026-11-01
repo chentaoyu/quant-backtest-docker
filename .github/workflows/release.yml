@@ -72,7 +72,7 @@ jobs:
         run: |
           docker pull "${{ env.IMAGE }}:${{ steps.vars.outputs.test_tag }}"
           docker run --rm --entrypoint python "${{ env.IMAGE }}:${{ steps.vars.outputs.test_tag }}" \
-            -c "from web.app import app; print('smoke OK:', app.title)"
+            -c "from web.app import app; from agent.server import app as agent; print('smoke OK:', app.title, agent.title)"
 
       - name: 创建 GitHub Release（仅 tag）
         if: startsWith(github.ref, 'refs/tags/v')

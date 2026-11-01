@@ -6,17 +6,21 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
+import urllib.error
+import urllib.request
 import warnings
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -402,6 +406,45 @@ def report(folder: str, filename: str) -> FileResponse:
     if not path.is_file():
         raise HTTPException(status_code=404, detail="报告不存在")
     return FileResponse(path, media_type="text/html; charset=utf-8")
+
+
+# ---------------------------------------------------------------- Agent 代理
+# 前端只连 web（同源、ECS 只需暴露一个端口）；agent 服务在 compose 内网 / 本机 8100
+AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8100").rstrip("/")
+_agent_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+
+
+@app.api_route("/api/agent/{path:path}", methods=["GET", "POST"], include_in_schema=False)
+async def agent_proxy(path: str, request: Request):
+    url = f"{AGENT_URL}/api/agent/{path}" + (f"?{request.url.query}" if request.url.query else "")
+    body = await request.body() if request.method == "POST" else None
+    req = urllib.request.Request(url, data=body, method=request.method, headers={"Content-Type": "application/json"})
+
+    if path == "alerts/stream":
+        try:
+            upstream = await run_in_threadpool(_agent_opener.open, req, None, 30)
+        except (urllib.error.URLError, OSError) as exc:
+            raise HTTPException(status_code=502, detail=f"Agent 服务不可用：{exc}") from exc
+
+        def relay():
+            with upstream:
+                yield from upstream  # 按行转发 SSE
+
+        return StreamingResponse(relay(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    def fetch() -> tuple[int, bytes]:
+        try:
+            with _agent_opener.open(req, timeout=600) as resp:
+                return resp.status, resp.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read()
+
+    try:
+        status, content = await run_in_threadpool(fetch)
+    except (urllib.error.URLError, OSError) as exc:
+        raise HTTPException(status_code=502, detail=f"Agent 服务不可用（{AGENT_URL}）：{exc}") from exc
+    return Response(content, status_code=status, media_type="application/json")
 
 
 if __name__ == "__main__":

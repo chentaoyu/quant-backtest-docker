@@ -24,6 +24,8 @@ import ConfigPanel from "./components/ConfigPanel";
 import HistoryPanel from "./components/HistoryPanel";
 import UpdateModal from "./components/UpdateModal";
 import HoldingsPanel from "./components/HoldingsPanel";
+import MonitorPanel from "./components/MonitorPanel";
+import { useAlertStream } from "./hooks/useAlertStream";
 import SimPanel from "./components/SimPanel";
 import WatchlistPanel from "./components/WatchlistPanel";
 import ResultPanel from "./components/ResultPanel";
@@ -39,7 +41,7 @@ import type {
 
 const { Text } = Typography;
 
-type View = "single" | "holdings" | "watchlist" | "sim";
+type View = "single" | "holdings" | "watchlist" | "sim" | "monitor";
 
 function fallbackStocks(meta: Meta): Stock[] {
   return meta.symbols.map((item) => ({
@@ -78,6 +80,13 @@ export default function App() {
   const [retry, setRetry] = useState(0);
   const [booted, setBooted] = useState(false);
   const [view, setView] = useState<View>("single");
+  // 盯盘告警全局订阅：任何页面都弹通知；未查看的注意/告警数显示在“盯盘”页签上
+  const { incoming, connected } = useAlertStream();
+  const [seenAlertId, setSeenAlertId] = useState(0);
+  const unread = incoming.filter((a) => a.level !== "info" && a.id > seenAlertId).length;
+  useEffect(() => {
+    if (view === "monitor" && incoming.length) setSeenAlertId(incoming[0].id);
+  }, [view, incoming]);
 
   const initForm = useCallback(
     (data: Meta) => {
@@ -316,7 +325,7 @@ export default function App() {
             <div className="brand-logo">Q</div>
             <div>
               <div className="brand-title">量化回测台</div>
-              <div className="brand-sub">A 股日线 · 持仓建议 · 自选 · 模拟仓</div>
+              <div className="brand-sub">A 股日线 · 持仓建议 · 自选 · 模拟仓 · 盯盘</div>
             </div>
           </div>
           <Space size={6} wrap>
@@ -374,11 +383,21 @@ export default function App() {
                     { key: "holdings", label: "我的持仓" },
                     { key: "watchlist", label: "自选股" },
                     { key: "sim", label: "模拟仓" },
+                    {
+                      key: "monitor",
+                      label: (
+                        <Badge count={unread} size="small" offset={[8, -2]}>
+                          盯盘
+                        </Badge>
+                      ),
+                    },
                   ]}
                 />
               </div>
 
-              {view === "watchlist" && meta ? (
+              {view === "monitor" ? (
+                <MonitorPanel incoming={incoming} connected={connected} />
+              ) : view === "watchlist" && meta ? (
                 <WatchlistPanel meta={meta} stocks={stocks} stocksLoading={stocksLoading} />
               ) : view === "sim" ? (
                 <SimPanel stocks={stocks} stocksLoading={stocksLoading} />

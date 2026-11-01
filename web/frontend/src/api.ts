@@ -6,6 +6,9 @@ import type {
   ImportRow,
   Job,
   KlineResponse,
+  LiveMarket,
+  MonitorAlert,
+  MonitorStatus,
   Meta,
   SimAccountBrief,
   SimState,
@@ -121,4 +124,12 @@ export const api = {
     request<unknown>(`/api/sim/accounts/${id}/orders`, json("POST", body)),
   cancelOrder: (id: string, orderId: string) =>
     request<{ ok: boolean }>(`/api/sim/accounts/${id}/orders/${orderId}`, { method: "DELETE" }),
+  // ---------------- 盯盘（经 web 代理到 agent 服务） ----------------
+  monitorStatus: () => request<MonitorStatus>("/api/agent/monitor/status"),
+  monitorMarket: (refresh = false) =>
+    request<LiveMarket>(`/api/agent/monitor/market${refresh ? "?refresh=true" : ""}`),
+  monitorTick: () =>
+    request<{ new: MonitorAlert[]; status: MonitorStatus }>("/api/agent/monitor/tick", { method: "POST" }),
+  alerts: (limit = 200, day?: string) =>
+    request<MonitorAlert[]>(`/api/agent/alerts?limit=${limit}${day ? `&day=${day}` : ""}`),
 };
