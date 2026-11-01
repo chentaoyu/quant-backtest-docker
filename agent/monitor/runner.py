@@ -1,23 +1,18 @@
-"""盯盘调度：交易时段每 MONITOR_INTERVAL 秒跑一轮 规则 → 去重 → （快模型写一句解读）→ 入库。"""
+"""盯盘调度：交易时段每 interval 秒跑一轮 规则 → 去重 → （大模型写一句解读）→ 入库。配置见 agent.settings。"""
 from __future__ import annotations
 
 import json
 import logging
-import os
 import threading
 import time
 from datetime import datetime
 
-from agent import llm, tools
+from agent import llm, settings, tools
 from agent.monitor import market, rules, store
 
 log = logging.getLogger("agent.monitor")
 
-INTERVAL = int(os.getenv("MONITOR_INTERVAL", "60"))
 WATCH_TTL = 900  # 持仓/自选清单与触发价 15 分钟刷新一次（触发价基于昨收，盘中不变）
-NOTE_ENABLED = os.getenv("MONITOR_LLM_NOTE", "1") == "1"
-# 解读默认用主模型：调用量小（每轮几条），实测 4b 容易把策略名脑补成指标结论
-NOTE_MODEL = os.getenv("MONITOR_NOTE_MODEL", "main")
 
 NOTE_PROMPT = """你是 A 股盘中盯盘助手。根据告警、个股行业和市场快照，用一句话（不超过 50 字）点出这条告警值得注意的原因或应对思路。
 不要重复告警里的数字；只能依据给出的数据，不要推断策略或指标状态，信息不足就说明需要关注什么。"""
@@ -28,8 +23,7 @@ class Monitor:
         self.watch: list[dict] = []
         self.watch_at = 0.0
         self.market: dict | None = None
-        self.status = {"enabled": os.getenv("MONITOR_ENABLED", "1") == "1", "interval": INTERVAL,
-                       "last_tick": None, "last_error": None, "last_new": 0, "ticks": 0}
+        self.status = {"last_tick": None, "last_error": None, "last_new": 0, "ticks": 0}
         self._lock = threading.Lock()
         self._stop = threading.Event()
 
@@ -56,27 +50,30 @@ class Monitor:
     def tick(self) -> list[dict]:
         with self._lock:  # 定时线程和手动触发不并发
             now = datetime.now()
+            cfg = settings.get().monitor
+            thresholds = cfg.model_dump(include=set(rules.DEFAULTS))
             self._refresh_watch()
             self.market = market.live_market()
             quotes = market.live_quotes([w["symbol"] for w in self.watch]) if self.watch else {}
 
-            alerts = rules.market_alerts(self.market)
+            alerts = rules.market_alerts(self.market, thresholds)
             for item in self.watch:
                 if item["symbol"] in quotes:
-                    alerts += rules.stock_alerts(item, quotes[item["symbol"]])
+                    alerts += rules.stock_alerts(item, quotes[item["symbol"]], thresholds)
+            alerts = [a for a in alerts if a["rule"] not in cfg.disabled_rules]
 
             day = now.strftime("%Y-%m-%d")
             seen = store.fired(day)
             new = [a for a in alerts if rules.LEVELS[a["level"]] > seen.get((a["rule"], a["symbol"]), -1)]
             for a in new:
-                if NOTE_ENABLED and a["symbol"] and a["level"] != "info" and a["symbol"] in quotes:
-                    a["note"] = self._note(a)
+                if cfg.llm_note and a["symbol"] and a["level"] != "info" and a["symbol"] in quotes:
+                    a["note"] = self._note(a, cfg.note_model)
             store.add(now.isoformat(timespec="seconds"), day, new)
             self.status.update(last_tick=now.isoformat(timespec="seconds"), last_error=None, last_new=len(new),
                                ticks=self.status["ticks"] + 1)
             return new
 
-    def _note(self, alert: dict) -> str | None:
+    def _note(self, alert: dict, model: str) -> str | None:
         item = next((w for w in self.watch if w["symbol"] == alert["symbol"]), {})
         m = self.market or {}
         context = {
@@ -89,7 +86,7 @@ class Monitor:
         try:
             resp = llm.chat([{"role": "system", "content": NOTE_PROMPT},
                              {"role": "user", "content": json.dumps(context, ensure_ascii=False)}],
-                            model=NOTE_MODEL, reasoning="none", temperature=0.3)
+                            model=model, reasoning="none", temperature=0.3)
             return (resp["message"].get("content") or "").strip()[:120] or None
         except llm.LLMError as exc:
             log.warning("告警解读失败：%s", exc)
@@ -97,15 +94,15 @@ class Monitor:
 
     # ---------------------------------------------------------------- 后台线程
     def start(self) -> None:
-        if self.status["enabled"]:
-            threading.Thread(target=self._loop, name="monitor", daemon=True).start()
+        threading.Thread(target=self._loop, name="monitor", daemon=True).start()
 
     def stop(self) -> None:
         self._stop.set()
 
     def _loop(self) -> None:
-        while not self._stop.wait(INTERVAL):
-            if not market.is_trading_time():
+        # 每轮重新读配置：页面改开关/间隔无需重启
+        while not self._stop.wait(settings.get().monitor.interval):
+            if not settings.get().monitor.enabled or not market.is_trading_time():
                 continue
             try:
                 self.tick()
@@ -114,7 +111,9 @@ class Monitor:
                 self.status["last_error"] = f"{datetime.now():%H:%M:%S} {exc}"
 
     def info(self) -> dict:
-        return {**self.status, "trading": market.is_trading_time(), "watch_count": len(self.watch),
+        cfg = settings.get().monitor
+        return {**self.status, "enabled": cfg.enabled, "interval": cfg.interval,
+                "trading": market.is_trading_time(), "watch_count": len(self.watch),
                 "holdings": sum(w["kind"] == "holding" for w in self.watch)}
 
 

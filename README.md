@@ -125,6 +125,8 @@ uv run python -m agent "用 macd 回测 600519，20240101 切分"   # 本地命�
 - 级别（提示 / 注意 / 告警）只由规则决定；同一股票同一规则每天只报一次，升级才再报。注意及以上的个股告警由主模型补一句解读（`MONITOR_LLM_NOTE=0` 关闭）。
 - 「立即检查」不受交易时段限制，盘后也能按收盘价跑一轮。告警存 `data/agent/monitor.db`。
 
+**页面设置**：右上角「Agent」（或盯盘页「设置」）可在线修改模型（接口地址 / 主模型 / 快模型 / 思考模式，带测速）、盯盘（开关 / 间隔 / AI 解读 / 各项阈值 / 逐条规则开关）和通知（弹窗级别 / 告警是否常驻）。模型与盯盘设置存 `data/agent/settings.json`、立即生效且优先于 `.env`；「恢复默认」回到 `.env` 的值。通知偏好只存在当前浏览器。
+
 `chat` 参数：`model`（`main` / `fast` / 具体模型名）、`reasoning`（`none` / `low` / `medium` / `high`）、`history`（多轮对话）。换模型或改用云端 OpenAI 兼容接口只需改 `LLM_*` 环境变量。模型速度对比：`python3 scripts/llm_bench.py 模型A 模型B`。
 
 ## 环境变量
@@ -330,7 +332,8 @@ web/update_api.py      在线更新 API（版本检测 / 触发 / 状态 / 回�
 web/frontend/          React + antd + ECharts 源码
 agent/llm.py           LLM 网关（OpenAI 兼容）+ 工具调用循环
 agent/tools.py         Agent 工具（持仓/自选/回测/体检/行情/市场复盘）
-agent/server.py        Agent HTTP 服务（/api/agent/chat、盯盘接口）
+agent/server.py        Agent HTTP 服务（/api/agent/chat、盯盘、配置接口）
+agent/settings.py      运行时配置（.env 默认 + 页面覆盖）
 agent/monitor/         盯盘：盘中行情 market / 规则引擎 rules / 告警库 store / 调度 runner
 scripts/llm_bench.py   本地模型速度与工具调用质量对比
 .github/workflows/release.yml  CI：构建镜像推 GHCR + 创建 Release

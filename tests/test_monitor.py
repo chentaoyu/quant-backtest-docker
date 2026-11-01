@@ -1,3 +1,4 @@
+import json
 import sys
 from pathlib import Path
 
@@ -5,6 +6,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from agent import settings  # noqa: E402
 from agent.monitor import rules, runner, store  # noqa: E402
 
 
@@ -88,6 +90,8 @@ def test_market_alerts():
 @pytest.fixture
 def db(tmp_path, monkeypatch):
     monkeypatch.setattr(store, "DB_PATH", tmp_path / "m.db")
+    monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "settings.json")
+    monkeypatch.setattr(settings, "_cache", None)
 
 
 def test_store_roundtrip_and_fired(db):
@@ -104,7 +108,7 @@ def test_store_roundtrip_and_fired(db):
 
 def test_tick_dedupes_and_escalates(db, monkeypatch):
     prices = {"600000": 10.6}
-    monkeypatch.setattr(runner, "NOTE_ENABLED", False)
+    settings.update({"monitor": {"llm_note": False}})
     monkeypatch.setattr(runner.market, "live_market", lambda: {"indexes": [], "breadth": None, "sectors": None})
     monkeypatch.setattr(runner.market, "live_quotes", lambda syms: {s: quote(prices[s]) for s in syms})
     monkeypatch.setattr(runner.tools, "_industries", lambda: {})
@@ -117,6 +121,30 @@ def test_tick_dedupes_and_escalates(db, monkeypatch):
     prices["600000"] = 10.85  # +8.5% 升级为 alert
     assert rules_of(m.tick()) == {"move_up": "alert"}
     assert m.info()["watch_count"] == 1 and m.status["ticks"] == 3
+
+    prices["600000"] = 9.0  # 跌停，但该规则在页面被关闭
+    settings.update({"monitor": {"disabled_rules": ["limit_down"]}})
+    assert m.tick() == []
+
+
+def test_thresholds_from_settings(db):
+    item = {"symbol": "600000", "name": "浦发银行", "kind": "watch"}
+    assert rules.stock_alerts(item, quote(10.4)) == []  # 默认 +4% < 5%
+    cfg = {**rules.DEFAULTS, "move_warn": 0.3}
+    assert rules_of(rules.stock_alerts(item, quote(10.4), cfg)) == {"move_up": "warn"}
+
+
+def test_settings_persist_only_overrides(db, monkeypatch):
+    monkeypatch.setenv("MONITOR_INTERVAL", "45")
+    assert settings.get().monitor.interval == 45  # .env 默认值
+    settings.update({"monitor": {"move_warn": 0.4}, "llm": {"fast": "qwen3.5:9b"}})
+    saved = json.loads(settings.SETTINGS_FILE.read_text())
+    assert saved == {"llm": {"fast": "qwen3.5:9b"}, "monitor": {"move_warn": 0.4}}
+    pub = settings.public()
+    assert "api_key" not in pub["llm"] and pub["overridden"] == {"llm": ["fast"], "monitor": ["move_warn"]}
+    with pytest.raises(Exception):
+        settings.update({"monitor": {"interval": 1}})  # 低于下限
+    assert settings.reset().llm.fast != "qwen3.5:9b" and not settings.SETTINGS_FILE.exists()
 
 
 def test_sse_stream_yields_new_alerts(db):

@@ -5,7 +5,11 @@ import type {
   HoldingsAnalysis,
   ImportRow,
   Job,
+  AgentSettings,
+  AgentStatus,
   KlineResponse,
+  LlmModel,
+  ModelTestResult,
   LiveMarket,
   MonitorAlert,
   MonitorStatus,
@@ -132,4 +136,11 @@ export const api = {
     request<{ new: MonitorAlert[]; status: MonitorStatus }>("/api/agent/monitor/tick", { method: "POST" }),
   alerts: (limit = 200, day?: string) =>
     request<MonitorAlert[]>(`/api/agent/alerts?limit=${limit}${day ? `&day=${day}` : ""}`),
+  agentStatus: () => request<AgentStatus>("/api/agent/status"),
+  agentSettings: () => request<AgentSettings>("/api/agent/settings"),
+  saveAgentSettings: (patch: Record<string, unknown>) =>
+    request<AgentSettings>("/api/agent/settings", json("PUT", patch)),
+  resetAgentSettings: () => request<AgentSettings>("/api/agent/settings/reset", { method: "POST" }),
+  llmModels: () => request<LlmModel[]>("/api/agent/models"),
+  testModel: (model: string) => request<ModelTestResult>("/api/agent/models/test", json("POST", { model })),
 };

@@ -5,15 +5,16 @@
 """
 from __future__ import annotations
 
+import time
 from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
-from agent import llm, tools
+from agent import llm, settings, tools
 from agent.monitor import market, store
 from agent.monitor.runner import monitor, sse_stream
 
@@ -67,10 +68,11 @@ def health() -> dict:
 @app.get("/api/agent/status")
 def status() -> dict:
     """依赖检查：LLM 服务、所需模型、回测服务。"""
-    out = {"llm_base_url": llm.BASE_URL, "models": llm.MODELS, "web_url": tools.WEB_URL}
+    cfg = llm.config()
+    out = {"llm_base_url": cfg.base_url, "models": {"main": cfg.main, "fast": cfg.fast}, "web_url": tools.WEB_URL}
     try:
         available = llm.list_models()
-        out["llm"] = {"ok": True, "missing": [m for m in llm.MODELS.values() if m not in available]}
+        out["llm"] = {"ok": True, "missing": [m for m in (cfg.main, cfg.fast) if m not in available]}
     except llm.LLMError as exc:
         out["llm"] = {"ok": False, "error": str(exc)}
     try:
@@ -127,3 +129,56 @@ def alerts(limit: int = 100, since_id: int = 0, day: str | None = None) -> list[
 def alerts_stream(last_id: int | None = None) -> StreamingResponse:
     return StreamingResponse(sse_stream(last_id), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ---------------------------------------------------------------- 配置
+@app.get("/api/agent/settings")
+def get_settings() -> dict:
+    return settings.public()
+
+
+@app.put("/api/agent/settings")
+def put_settings(patch: dict) -> dict:
+    """部分更新：只传要改的字段；api_key 传空串表示不修改。"""
+    if not (patch.get("llm") or {}).get("api_key", "x"):
+        patch["llm"].pop("api_key")
+    try:
+        settings.update(patch)
+    except ValidationError as exc:
+        raise HTTPException(status_code=400, detail="；".join(
+            f"{'.'.join(map(str, e['loc']))}：{e['msg']}" for e in exc.errors())) from exc
+    return settings.public()
+
+
+@app.post("/api/agent/settings/reset")
+def reset_settings() -> dict:
+    settings.reset()
+    return settings.public()
+
+
+@app.get("/api/agent/models")
+def models() -> list[dict]:
+    try:
+        return llm.model_details()
+    except llm.LLMError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
+class TestRequest(BaseModel):
+    model: str
+
+
+@app.post("/api/agent/models/test")
+def test_model(payload: TestRequest) -> dict:
+    """用当前配置调一次模型：首次调用含加载时间，再测一次才是稳态速度。"""
+    started = time.time()
+    try:
+        resp = llm.chat([{"role": "user", "content": "用一句话介绍你自己，不超过 30 字。"}],
+                        model=payload.model, reasoning="none", temperature=0)
+    except llm.LLMError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    elapsed = time.time() - started
+    tokens = resp["usage"].get("completion_tokens", 0)
+    return {"model": llm.model_name(payload.model), "reply": resp["message"].get("content") or "",
+            "elapsed_sec": round(elapsed, 2), "completion_tokens": tokens,
+            "tokens_per_sec": round(tokens / elapsed, 1) if elapsed else None}

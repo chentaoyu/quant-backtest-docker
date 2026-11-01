@@ -9,10 +9,9 @@ from signals import price_limit
 
 LEVELS = {"info": 0, "warn": 1, "alert": 2}
 
-INDEX_WARN, INDEX_ALERT, INDEX_UP = -2.0, -3.0, 2.0  # 指数涨跌幅阈值（%）
-BREADTH_WARN = 0.8  # 下跌家数占比
-LIMIT_DOWN_ALERT = 50  # 跌停家数
-MOVE_WARN, MOVE_ALERT = 0.5, 0.8  # 个股涨跌幅达到涨跌停幅度的比例
+# 阈值（页面可改，见 agent.settings.MonitorSettings）：未传 cfg 时用这些默认值
+DEFAULTS = {"index_warn": -2.0, "index_alert": -3.0, "index_up": 2.0, "breadth_warn": 0.8,
+            "limit_down_alert": 50, "move_warn": 0.5, "move_alert": 0.8}
 
 
 def _alert(rule: str, level: str, item: dict, title: str, message: str, **data) -> dict:
@@ -34,8 +33,9 @@ def trigger_hit(trig: dict | None, price: float) -> bool:
     return (below is not None and price <= below) or (above is not None and price >= above)
 
 
-def stock_alerts(item: dict, q: dict) -> list[dict]:
+def stock_alerts(item: dict, q: dict, cfg: dict | None = None) -> list[dict]:
     """item：{symbol, name, kind: holding|watch, cost_price?, stop_loss_pct?, take_profit_pct?, strategy?, triggers?}"""
+    cfg = cfg or DEFAULTS
     out: list[dict] = []
     price, pre = q["price"], q["pre_close"]
     if not price or not pre:
@@ -51,8 +51,8 @@ def stock_alerts(item: dict, q: dict) -> list[dict]:
         out.append(_alert("limit_up" if up else "limit_down", "alert" if holding or not up else "warn", item,
                           f"{tag}{item['name']}{'涨停' if up else '跌停'}",
                           f"现价 {price}（{chg:+.2f}%）", price=price, change_pct=round(chg, 2)))
-    elif abs(chg) >= limit * 100 * MOVE_WARN:
-        level = "alert" if abs(chg) >= limit * 100 * MOVE_ALERT else "warn"
+    elif abs(chg) >= limit * 100 * cfg["move_warn"]:
+        level = "alert" if abs(chg) >= limit * 100 * cfg["move_alert"] else "warn"
         out.append(_alert("move_up" if chg > 0 else "move_down", level, item,
                           f"{tag}{item['name']}{'大涨' if chg > 0 else '大跌'} {chg:+.2f}%",
                           f"现价 {price}，最高 {q['high']}，最低 {q['low']}", price=price, change_pct=round(chg, 2)))
@@ -84,26 +84,27 @@ def stock_alerts(item: dict, q: dict) -> list[dict]:
     return out
 
 
-def market_alerts(market: dict) -> list[dict]:
+def market_alerts(market: dict, cfg: dict | None = None) -> list[dict]:
+    cfg = cfg or DEFAULTS
     out: list[dict] = []
     for idx in market.get("indexes") or []:
         chg = idx.get("change_pct")
         if chg is None:
             continue
         item = {"symbol": idx["code"], "name": idx["name"]}
-        if chg <= INDEX_WARN:
-            out.append(_alert("index_drop", "alert" if chg <= INDEX_ALERT else "warn", item,
+        if chg <= cfg["index_warn"]:
+            out.append(_alert("index_drop", "alert" if chg <= cfg["index_alert"] else "warn", item,
                               f"{idx['name']}下跌 {chg:+.2f}%", f"现报 {idx['price']:.2f}", change_pct=chg))
-        elif chg >= INDEX_UP:
+        elif chg >= cfg["index_up"]:
             out.append(_alert("index_rise", "info", item, f"{idx['name']}上涨 {chg:+.2f}%",
                               f"现报 {idx['price']:.2f}", change_pct=chg))
     b = market.get("breadth")
     if b:
         mkt = {"symbol": None, "name": "全市场"}
-        if b.get("down_ratio") is not None and b["down_ratio"] >= BREADTH_WARN:
+        if b.get("down_ratio") is not None and b["down_ratio"] >= cfg["breadth_warn"]:
             out.append(_alert("breadth_down", "warn", mkt, "市场普跌",
                               f"下跌 {b['down']} 家 / 上涨 {b['up']} 家，跌停 {b['limit_down']} 家", **b))
-        if b.get("limit_down", 0) >= LIMIT_DOWN_ALERT:
+        if b.get("limit_down", 0) >= cfg["limit_down_alert"]:
             out.append(_alert("limit_down_wave", "alert", mkt, f"跌停潮：{b['limit_down']} 家跌停",
                               f"涨停 {b['limit_up']} 家，跌超 5% 的 {b['down_over_5pct']} 家", **b))
     return out

@@ -591,3 +591,53 @@ export interface MonitorStatus {
   watch_count: number;
   holdings: number;
 }
+
+export interface AgentSettings {
+  llm: {
+    base_url: string;
+    api_key_set: boolean;
+    main: string;
+    fast: string;
+    reasoning: "none" | "low" | "medium" | "high";
+    timeout: number;
+  };
+  monitor: {
+    enabled: boolean;
+    interval: number;
+    llm_note: boolean;
+    note_model: "main" | "fast";
+    index_warn: number;
+    index_alert: number;
+    index_up: number;
+    breadth_warn: number;
+    limit_down_alert: number;
+    move_warn: number;
+    move_alert: number;
+    disabled_rules: string[];
+  };
+  rules: Record<string, string>;
+  overridden: Record<string, string[]>;
+}
+
+export interface LlmModel {
+  name: string;
+  size_gb?: number;
+  loaded?: boolean;
+  params?: string;
+  quant?: string;
+}
+
+export interface ModelTestResult {
+  model: string;
+  reply: string;
+  elapsed_sec: number;
+  completion_tokens: number;
+  tokens_per_sec: number | null;
+}
+
+export interface AgentStatus {
+  llm_base_url: string;
+  models: { main: string; fast: string };
+  llm: { ok: boolean; missing?: string[]; error?: string };
+  web: { ok: boolean; error?: string };
+}

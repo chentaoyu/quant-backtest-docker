@@ -1,5 +1,5 @@
 import { App as AntApp, Alert, Button, Card, Col, Empty, Row, Segmented, Space, Spin, Table, Tag, Tooltip, Typography } from "antd";
-import { ReloadOutlined, RobotOutlined, ThunderboltOutlined } from "@ant-design/icons";
+import { ReloadOutlined, RobotOutlined, SettingOutlined, ThunderboltOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { cnColor, pct } from "../format";
@@ -11,6 +11,7 @@ const { Text } = Typography;
 interface Props {
   incoming: MonitorAlert[];
   connected: boolean;
+  onOpenSettings: () => void;
 }
 
 const today = () => new Date().toLocaleDateString("sv-SE"); // YYYY-MM-DD
@@ -34,7 +35,7 @@ function SectorList({ title, rows }: { title: string; rows: LiveSector[] }) {
   );
 }
 
-export default function MonitorPanel({ incoming, connected }: Props) {
+export default function MonitorPanel({ incoming, connected, onOpenSettings }: Props) {
   const { message } = AntApp.useApp();
   const [market, setMarket] = useState<LiveMarket | null>(null);
   const [status, setStatus] = useState<MonitorStatus | null>(null);
@@ -175,7 +176,7 @@ export default function MonitorPanel({ incoming, connected }: Props) {
               </Tooltip>
               {status && (
                 <Text type="secondary" style={{ fontWeight: 400, fontSize: 13 }}>
-                  {status.trading ? "盘中盯盘中" : "非交易时段"} · 盯 {status.watch_count} 只（持仓 {status.holdings}）· 每 {status.interval}s
+                  {!status.enabled ? "自动盯盘已关闭" : status.trading ? "盘中盯盘中" : "非交易时段"} · 盯 {status.watch_count} 只（持仓 {status.holdings}）· 每 {status.interval}s
                   {status.last_tick ? ` · 上次检查 ${status.last_tick.slice(11)}` : ""}
                 </Text>
               )}
@@ -187,6 +188,9 @@ export default function MonitorPanel({ incoming, connected }: Props) {
                 options={[{ label: "今天", value: "today" }, { label: "全部", value: "all" }]} />
               <Segmented size="small" value={level} onChange={(v) => setLevel(v as "all" | AlertLevel)}
                 options={[{ label: "全部级别", value: "all" }, ...(["alert", "warn", "info"] as const).map((k) => ({ label: LEVEL_META[k].label, value: k }))]} />
+              <Button size="small" icon={<SettingOutlined />} onClick={onOpenSettings}>
+                设置
+              </Button>
               <Tooltip title="不论是否开盘，立即按当前行情检查一轮">
                 <Button size="small" type="primary" icon={<ThunderboltOutlined />} loading={ticking} onClick={() => void tick()}>
                   立即检查

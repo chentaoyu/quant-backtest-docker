@@ -17,6 +17,7 @@ import {
   Typography,
 } from "antd";
 import { Form } from "antd";
+import { SettingOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
@@ -25,6 +26,7 @@ import HistoryPanel from "./components/HistoryPanel";
 import UpdateModal from "./components/UpdateModal";
 import HoldingsPanel from "./components/HoldingsPanel";
 import MonitorPanel from "./components/MonitorPanel";
+import AgentSettingsDrawer from "./components/AgentSettingsDrawer";
 import { useAlertStream } from "./hooks/useAlertStream";
 import SimPanel from "./components/SimPanel";
 import WatchlistPanel from "./components/WatchlistPanel";
@@ -83,6 +85,14 @@ export default function App() {
   // 盯盘告警全局订阅：任何页面都弹通知；未查看的注意/告警数显示在“盯盘”页签上
   const { incoming, connected } = useAlertStream();
   const [seenAlertId, setSeenAlertId] = useState(0);
+  const [agentOpen, setAgentOpen] = useState(false);
+  const [agentOk, setAgentOk] = useState<boolean | null>(null);
+  useEffect(() => {
+    api
+      .agentStatus()
+      .then((s) => setAgentOk(s.llm.ok && !s.llm.missing?.length))
+      .catch(() => setAgentOk(false));
+  }, [agentOpen]);
   const unread = incoming.filter((a) => a.level !== "info" && a.id > seenAlertId).length;
   useEffect(() => {
     if (view === "monitor" && incoming.length) setSeenAlertId(incoming[0].id);
@@ -343,6 +353,13 @@ export default function App() {
                 </Tag>
               </Tooltip>
             )}
+            <Tooltip title={agentOk === false ? "Agent / 模型服务异常，点击查看" : "Agent 模型、盯盘与通知设置"}>
+              <Badge dot status={agentOk === false ? "error" : "success"} offset={[-4, 0]}>
+                <Tag icon={<SettingOutlined />} style={{ cursor: "pointer", marginInlineEnd: 0 }} onClick={() => setAgentOpen(true)}>
+                  Agent
+                </Tag>
+              </Badge>
+            </Tooltip>
             <Tooltip title="版本与在线更新">
               <Badge dot={versionInfo?.has_update === true} color="green" offset={[-4, 0]}>
                 <Tag
@@ -396,7 +413,7 @@ export default function App() {
               </div>
 
               {view === "monitor" ? (
-                <MonitorPanel incoming={incoming} connected={connected} />
+                <MonitorPanel incoming={incoming} connected={connected} onOpenSettings={() => setAgentOpen(true)} />
               ) : view === "watchlist" && meta ? (
                 <WatchlistPanel meta={meta} stocks={stocks} stocksLoading={stocksLoading} />
               ) : view === "sim" ? (
@@ -479,6 +496,7 @@ export default function App() {
       </Layout.Content>
 
       <UpdateModal open={updateOpen} onClose={() => setUpdateOpen(false)} />
+      <AgentSettingsDrawer open={agentOpen} onClose={() => setAgentOpen(false)} />
     </Layout>
   );
 }

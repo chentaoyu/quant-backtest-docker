@@ -414,10 +414,10 @@ AGENT_URL = os.getenv("AGENT_URL", "http://127.0.0.1:8100").rstrip("/")
 _agent_opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
-@app.api_route("/api/agent/{path:path}", methods=["GET", "POST"], include_in_schema=False)
+@app.api_route("/api/agent/{path:path}", methods=["GET", "POST", "PUT"], include_in_schema=False)
 async def agent_proxy(path: str, request: Request):
     url = f"{AGENT_URL}/api/agent/{path}" + (f"?{request.url.query}" if request.url.query else "")
-    body = await request.body() if request.method == "POST" else None
+    body = await request.body() if request.method in ("POST", "PUT") else None
     req = urllib.request.Request(url, data=body, method=request.method, headers={"Content-Type": "application/json"})
 
     if path == "alerts/stream":
