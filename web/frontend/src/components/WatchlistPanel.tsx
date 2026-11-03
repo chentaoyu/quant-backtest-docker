@@ -25,7 +25,7 @@ import {
   Tooltip,
   Typography,
 } from "antd";
-import { DownOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import { DownOutlined, PlusOutlined, ReloadOutlined, SyncOutlined } from "@ant-design/icons";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api } from "../api";
 import { cnColor, paramsText, pct, ratio } from "../format";
@@ -73,11 +73,12 @@ export default function WatchlistPanel({ meta, stocks, stocksLoading }: Props) {
   const [detail, setDetail] = useState<WatchRow | null>(null);
   const [joining, setJoining] = useState<WatchRow | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (sync = false) => {
     setLoading(true);
     try {
-      const result = await api.watchlist();
+      const result = await api.watchlist(sync);
       setData(result);
+      if (sync) message.success(`同步完成，数据截至 ${result.rows[0]?.data_date ?? "-"} 收盘`);
       setDetail((current) => (current ? result.rows.find((r) => r.symbol === current.symbol) ?? null : null));
     } catch (error) {
       message.error((error as Error).message);
@@ -146,6 +147,11 @@ export default function WatchlistPanel({ meta, stocks, stocksLoading }: Props) {
               <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
                 刷新
               </Button>
+              <Tooltip title="立即向数据源检查并拉取最新收盘日线">
+                <Button icon={<SyncOutlined />} onClick={() => void load(true)} loading={loading} disabled={!data?.rows.length}>
+                  同步数据
+                </Button>
+              </Tooltip>
               <Space size={6}>
                 <Switch size="small" checked={onlySignal} onChange={setOnlySignal} />
                 <span>只看今日有信号{data ? `（${data.signal_count}）` : ""}</span>

@@ -20,7 +20,7 @@ import {
   Tooltip,
   Typography,
 } from "antd";
-import { DownOutlined, ImportOutlined, PlusOutlined, ReloadOutlined } from "@ant-design/icons";
+import { DownOutlined, ImportOutlined, PlusOutlined, ReloadOutlined, SyncOutlined } from "@ant-design/icons";
 import dayjs, { type Dayjs } from "dayjs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api";
@@ -49,11 +49,12 @@ export default function HoldingsPanel({ meta, stocks, stocksLoading }: Props) {
   const [form] = Form.useForm<FormValues>();
 
   const setJobRef = useRef<(job: Job | null) => void>(() => undefined);
-  const load = useCallback(async () => {
+  const load = useCallback(async (sync = false) => {
     setLoading(true);
     try {
-      const result = await api.analysis();
+      const result = await api.analysis(sync);
       setData(result);
+      if (sync) message.success(`同步完成，数据截至 ${result.summary.data_date ?? "-"} 收盘`);
       if (result.job) setJobRef.current(result.job);
       setDetail((current) => (current ? result.rows.find((r) => r.symbol === current.symbol) ?? null : null));
     } catch (error) {
@@ -124,6 +125,11 @@ export default function HoldingsPanel({ meta, stocks, stocksLoading }: Props) {
       <Button icon={<ReloadOutlined />} onClick={() => void load()} loading={loading}>
         刷新
       </Button>
+      <Tooltip title="立即向数据源检查并拉取最新收盘日线">
+        <Button icon={<SyncOutlined />} onClick={() => void load(true)} loading={loading} disabled={!rows.length}>
+          同步数据
+        </Button>
+      </Tooltip>
     </Space>
   );
 

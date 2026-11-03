@@ -262,8 +262,8 @@ def holdings_import(payload: ImportRequest) -> dict:
 
 
 @app.get("/api/holdings/analysis")
-def holdings_analysis() -> dict:
-    return advisor.analyze_all()
+def holdings_analysis(sync: bool = False) -> dict:
+    return advisor.analyze_all(sync)
 
 
 @app.post("/api/holdings/checkup")
@@ -305,8 +305,8 @@ USER_ERRORS = (holdings.HoldingError, sim.SimError, BacktestError, DataError)
 
 
 @app.get("/api/watchlist")
-def watchlist_analysis() -> dict:
-    result = advisor.analyze_watchlist()
+def watchlist_analysis(sync: bool = False) -> dict:
+    result = advisor.analyze_watchlist(sync)
     slots = sim.active_slots_by_symbol()
     for row in result["rows"]:
         row["sim"] = slots.get(row["symbol"], [])

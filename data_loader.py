@@ -264,7 +264,7 @@ def _cache_lock(cache: Path) -> threading.Lock:
         return _LOCKS.setdefault(cache, threading.Lock())
 
 
-def _sync_cache(symbol: str, start: str, adjust: str, source: str, refresh: bool, warnings: list[str]):
+def _sync_cache(symbol: str, start: str, adjust: str, source: str, refresh: bool, warnings: list[str], sync: bool = False):
     """保证主缓存覆盖 start 至最近收盘日，返回 (df, fetched_at, 是否命中缓存)。"""
     cache = cache_file(symbol, adjust, source)
     now = datetime.now()
@@ -298,10 +298,10 @@ def _sync_cache(symbol: str, start: str, adjust: str, source: str, refresh: bool
         fetched_at = datetime.fromisoformat(meta["fetched_at"])
     except (KeyError, TypeError, ValueError):
         fetched_at = datetime.fromtimestamp(cache.stat().st_mtime)
-    # 收盘后数据源可能还没发布当天日线：缓存缺最新交易日时，每小时最多重试一次
+    # 收盘后数据源可能还没发布当天日线：缓存缺最新交易日时，每小时最多重试一次（sync 手动同步时立即重试）
     session = last_session_close(now)
     complete = df.index[-1].date() >= session.date()
-    if fetched_at >= session and (complete or now - fetched_at < RETRY_MISSING):
+    if fetched_at >= session and (complete or (not sync and now - fetched_at < RETRY_MISSING)):
         return df, fetched_at, True
 
     # 增量：先去掉盘中留下的半根 bar，再从最后一根完整 bar 开始补拉（重叠 1 根用于除权校验）
@@ -333,6 +333,7 @@ def load_daily(
     adjust: str = "qfq",
     source: str | None = None,
     refresh: bool = False,
+    sync: bool = False,
 ) -> pd.DataFrame:
     """返回 backtesting.py 需要的 OHLCV 数据（默认前复权）。
 
@@ -343,7 +344,7 @@ def load_daily(
     cache = cache_file(symbol, adjust, source)
     warnings: list[str] = []
     with _cache_lock(cache):
-        df, fetched_at, cached = _sync_cache(symbol, start, adjust, source, refresh, warnings)
+        df, fetched_at, cached = _sync_cache(symbol, start, adjust, source, refresh, warnings, sync)
 
     df = _slice_dates(df, start, end)
     if df.empty:
