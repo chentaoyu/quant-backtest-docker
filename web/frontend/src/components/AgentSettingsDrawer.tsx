@@ -21,6 +21,7 @@ import {
   Typography,
 } from "antd";
 import { useCallback, useEffect, useState } from "react";
+import { ReloadOutlined } from "@ant-design/icons";
 import { api } from "../api";
 import { loadNotifyPrefs, saveNotifyPrefs, type NotifyPrefs } from "../hooks/useAlertStream";
 import type { AgentSettings, AgentStatus, LlmModel, ModelTestResult } from "../types";
@@ -69,6 +70,40 @@ export default function AgentSettingsDrawer({ open, onClose }: Props) {
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
   const [tests, setTests] = useState<Record<string, ModelTestResult | string>>({});
+  const [modelsLoading, setModelsLoading] = useState(false);
+  const [modelsError, setModelsError] = useState<string | null>(null);
+  const baseUrl = Form.useWatch(["llm", "base_url"], form) as string | undefined;
+
+  // 按表单里的地址拉模型列表（未保存也能查）；当前选的模型不在新列表里就清空，逼用户重选
+  const fetchModels = useCallback(async () => {
+    const url = (form.getFieldValue(["llm", "base_url"]) as string | undefined)?.trim();
+    if (!url || !/^https?:\/\/.+/.test(url)) return;
+    setModelsLoading(true);
+    try {
+      const r = await api.llmModels(url, (form.getFieldValue(["llm", "api_key"]) as string) || undefined);
+      setModels(r.models);
+      setModelsError(null);
+      if (r.base_url !== url.replace(/\/+$/, "")) form.setFieldValue(["llm", "base_url"], r.base_url);
+      const names = new Set(r.models.map((m) => m.name));
+      for (const field of ["main", "fast"] as const) {
+        const current = form.getFieldValue(["llm", field]) as string | undefined;
+        if (r.models.length && current && !names.has(current)) form.setFieldValue(["llm", field], undefined);
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "获取模型失败";
+      const docker = /127\.0\.0\.1|localhost/.test(url) ? "（Agent 跑在容器里时，宿主机服务要用 host.docker.internal）" : "";
+      setModels([]);
+      setModelsError(msg + docker);
+    } finally {
+      setModelsLoading(false);
+    }
+  }, [form]);
+
+  useEffect(() => {
+    if (!open || !settings || !baseUrl) return;
+    const timer = setTimeout(() => void fetchModels(), 600);
+    return () => clearTimeout(timer);
+  }, [open, settings, baseUrl, fetchModels]);
 
   const load = useCallback(async () => {
     try {
@@ -77,7 +112,6 @@ export default function AgentSettingsDrawer({ open, onClose }: Props) {
       form.setFieldsValue(toForm(s));
       setError(null);
       api.agentStatus().then(setStatus).catch(() => setStatus(null));
-      api.llmModels().then(setModels).catch(() => setModels([]));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Agent 服务不可用");
     }
@@ -126,7 +160,7 @@ export default function AgentSettingsDrawer({ open, onClose }: Props) {
       setTests((t) => ({ ...t, [field]: e instanceof Error ? e.message : "测试失败" }));
     } finally {
       setTesting(null);
-      api.llmModels().then(setModels).catch(() => {});
+      void fetchModels();
     }
   };
 
@@ -204,9 +238,26 @@ export default function AgentSettingsDrawer({ open, onClose }: Props) {
                         }
                       />
                     )}
-                    <Form.Item name={["llm", "base_url"]} label="接口地址" extra="OpenAI 兼容接口；容器内访问宿主机 Ollama 用 http://host.docker.internal:11434/v1"
-                      rules={[{ required: true, type: "url", message: "请输入 http(s) 地址" }]}>
-                      <Input />
+                    <Form.Item
+                      label="接口地址"
+                      required
+                      extra={
+                        modelsError ? (
+                          <Text type="danger" style={{ fontSize: 12 }}>{modelsError}</Text>
+                        ) : (
+                          <span>
+                            {modelsLoading ? "正在获取模型列表…" : `已获取 ${models.length} 个模型`}
+                            ；OpenAI 兼容接口，只填 host:port 会自动补 /v1；容器内访问宿主机用 host.docker.internal
+                          </span>
+                        )
+                      }
+                    >
+                      <Space.Compact style={{ width: "100%" }}>
+                        <Form.Item name={["llm", "base_url"]} noStyle rules={[{ required: true, type: "url", message: "请输入 http(s) 地址" }]}>
+                          <Input placeholder="http://127.0.0.1:1234" />
+                        </Form.Item>
+                        <Button icon={<ReloadOutlined />} loading={modelsLoading} onClick={() => void fetchModels()}>获取模型</Button>
+                      </Space.Compact>
                     </Form.Item>
                     <Form.Item name={["llm", "api_key"]} label="API Key">
                       <Input.Password placeholder={settings?.llm.api_key_set ? "已设置，留空不修改" : "本地 Ollama 无需填写"} autoComplete="new-password" />

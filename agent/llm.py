@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from typing import Callable
 
@@ -23,13 +24,21 @@ def config() -> settings.LLMSettings:
     return settings.get().llm
 
 
-def _request(method: str, path: str, body: dict | None = None, timeout: float | None = None) -> dict:
+def resolve_base(base_url: str) -> str:
+    """只填了 host:port（如 http://127.0.0.1:1234）时补上 OpenAI 兼容路径 /v1。"""
+    url = base_url.strip().rstrip("/")
+    return url if urllib.parse.urlparse(url).path else url + "/v1"
+
+
+def _request(method: str, path: str, body: dict | None = None, timeout: float | None = None,
+             base_url: str | None = None, api_key: str | None = None) -> dict:
     cfg = config()
+    base = resolve_base(base_url or cfg.base_url)
     req = urllib.request.Request(
-        cfg.base_url.rstrip("/") + path,
+        base + path,
         data=json.dumps(body).encode() if body is not None else None,
         method=method,
-        headers={"Content-Type": "application/json", "Authorization": f"Bearer {cfg.api_key}"},
+        headers={"Content-Type": "application/json", "Authorization": f"Bearer {api_key or cfg.api_key}"},
     )
     try:
         with _opener.open(req, timeout=timeout or cfg.timeout) as resp:
@@ -37,7 +46,7 @@ def _request(method: str, path: str, body: dict | None = None, timeout: float | 
     except urllib.error.HTTPError as exc:
         raise LLMError(f"LLM 接口返回 {exc.code}：{exc.read().decode(errors='replace')[:300]}") from exc
     except (urllib.error.URLError, TimeoutError) as exc:
-        raise LLMError(f"连不上 LLM 服务 {cfg.base_url}：{exc}") from exc
+        raise LLMError(f"连不上 LLM 服务 {base}：{exc}") from exc
 
 
 def model_name(model: str) -> str:
@@ -45,20 +54,21 @@ def model_name(model: str) -> str:
     return {"main": cfg.main, "fast": cfg.fast}.get(model, model)
 
 
-def list_models() -> list[str]:
-    return [m["id"] for m in _request("GET", "/models", timeout=10).get("data", [])]
+def list_models(base_url: str | None = None, api_key: str | None = None) -> list[str]:
+    return [m["id"] for m in _request("GET", "/models", timeout=10, base_url=base_url, api_key=api_key).get("data", [])]
 
 
-def model_details() -> list[dict]:
-    """可选模型：Ollama 时补充体积/参数量/量化/是否已加载，其他 OpenAI 兼容服务只有名字。"""
-    root = config().base_url.rstrip("/").removesuffix("/v1")
+def model_details(base_url: str | None = None, api_key: str | None = None) -> list[dict]:
+    """可选模型：Ollama 时补充体积/参数量/量化/是否已加载，其他 OpenAI 兼容服务只有名字。
+    传 base_url / api_key 时按这个地址查（页面改了地址还没保存），否则用当前配置。"""
+    root = resolve_base(base_url or config().base_url).removesuffix("/v1")
     try:
         with _opener.open(root + "/api/tags", timeout=5) as resp:
             tags = json.load(resp)["models"]
         with _opener.open(root + "/api/ps", timeout=5) as resp:
             loaded = {m["name"] for m in json.load(resp)["models"]}
     except (urllib.error.URLError, TimeoutError, ValueError, KeyError):
-        return [{"name": m} for m in list_models()]
+        return [{"name": m} for m in list_models(base_url, api_key)]
     return [{"name": m["name"], "size_gb": round(m["size"] / 1e9, 1), "loaded": m["name"] in loaded,
              "params": m.get("details", {}).get("parameter_size"),
              "quant": m.get("details", {}).get("quantization_level")} for m in tags]

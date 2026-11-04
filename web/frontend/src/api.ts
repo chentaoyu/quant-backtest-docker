@@ -146,6 +146,7 @@ export const api = {
   saveAgentSettings: (patch: Record<string, unknown>) =>
     request<AgentSettings>("/api/agent/settings", json("PUT", patch)),
   resetAgentSettings: () => request<AgentSettings>("/api/agent/settings/reset", { method: "POST" }),
-  llmModels: () => request<LlmModel[]>("/api/agent/models"),
+  llmModels: (base_url: string, api_key?: string) =>
+    request<{ base_url: string; models: LlmModel[] }>("/api/agent/models", json("POST", { base_url, api_key })),
   testModel: (model: string) => request<ModelTestResult>("/api/agent/models/test", json("POST", { model })),
 };

@@ -164,6 +164,21 @@ def models() -> list[dict]:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
 
+class ModelsRequest(BaseModel):
+    base_url: str | None = None
+    api_key: str | None = None  # 留空用已保存的 key
+
+
+@app.post("/api/agent/models")
+def models_for(payload: ModelsRequest) -> dict:
+    """按页面上填的地址拉模型列表（未保存也能查），返回补全后的地址。"""
+    base = llm.resolve_base(payload.base_url or llm.config().base_url)
+    try:
+        return {"base_url": base, "models": llm.model_details(base, payload.api_key or None)}
+    except llm.LLMError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+
 class TestRequest(BaseModel):
     model: str
 
