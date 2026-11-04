@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import threading
+from concurrent.futures import ThreadPoolExecutor
 import urllib.error
 import urllib.request
 import warnings
@@ -36,7 +37,7 @@ from backtest_engine import (  # noqa: E402
     load_run,
     run,
 )
-from data_loader import CACHE_DIR, DataError, available_symbols, has_tushare_token, resolve_source  # noqa: E402
+from data_loader import CACHE_DIR, DataError, available_symbols, has_tushare_token, resolve_source, sync_daily  # noqa: E402
 from stock_list import load_stock_list  # noqa: E402
 import advisor  # noqa: E402
 import holdings  # noqa: E402
@@ -261,9 +262,35 @@ def holdings_import(payload: ImportRequest) -> dict:
     return {"holdings": items, "job": job}
 
 
+@app.post("/api/sync")
+def sync_data() -> dict:
+    """全局同步：持仓、自选、模拟仓用到的股票立即补到最近收盘日。"""
+    symbols = [h["symbol"] for h in holdings.list_holdings()] + [w["symbol"] for w in watchlist.list_items()]
+    for account in sim.list_accounts():
+        symbols += [x["symbol"] for x in account["slots"] + account["orders"]]
+    symbols = list(dict.fromkeys(symbols))
+
+    def one(symbol: str) -> tuple[str, str | None, str | None]:
+        try:
+            return symbol, sync_daily(symbol), None
+        except Exception as exc:  # noqa: BLE001 - 单只失败不影响其他
+            return symbol, None, str(exc)
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results = list(pool.map(one, symbols))
+    dates = {s: d for s, d, _ in results if d}
+    latest = max(dates.values(), default=None)
+    return {
+        "count": len(symbols),
+        "data_date": latest,
+        "behind": sorted(s for s, d in dates.items() if d < latest),
+        "errors": {s: e for s, _, e in results if e},
+    }
+
+
 @app.get("/api/holdings/analysis")
-def holdings_analysis(sync: bool = False) -> dict:
-    return advisor.analyze_all(sync)
+def holdings_analysis() -> dict:
+    return advisor.analyze_all()
 
 
 @app.post("/api/holdings/checkup")
@@ -305,8 +332,8 @@ USER_ERRORS = (holdings.HoldingError, sim.SimError, BacktestError, DataError)
 
 
 @app.get("/api/watchlist")
-def watchlist_analysis(sync: bool = False) -> dict:
-    result = advisor.analyze_watchlist(sync)
+def watchlist_analysis() -> dict:
+    result = advisor.analyze_watchlist()
     slots = sim.active_slots_by_symbol()
     for row in result["rows"]:
         row["sim"] = slots.get(row["symbol"], [])

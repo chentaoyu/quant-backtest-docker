@@ -333,7 +333,6 @@ def load_daily(
     adjust: str = "qfq",
     source: str | None = None,
     refresh: bool = False,
-    sync: bool = False,
 ) -> pd.DataFrame:
     """返回 backtesting.py 需要的 OHLCV 数据（默认前复权）。
 
@@ -344,7 +343,7 @@ def load_daily(
     cache = cache_file(symbol, adjust, source)
     warnings: list[str] = []
     with _cache_lock(cache):
-        df, fetched_at, cached = _sync_cache(symbol, start, adjust, source, refresh, warnings, sync)
+        df, fetched_at, cached = _sync_cache(symbol, start, adjust, source, refresh, warnings)
 
     df = _slice_dates(df, start, end)
     if df.empty:
@@ -363,6 +362,17 @@ def load_daily(
         dropped=dropped,
         warnings=warnings,
     )
+
+
+def sync_daily(symbol: str, adjust: str = "qfq", source: str | None = None) -> str:
+    """把缓存立即补到最近收盘日（忽略重试间隔），返回最新完整日线的日期。"""
+    source = resolve_source(source)
+    cache = cache_file(symbol, adjust, source)
+    start = _read_meta(cache).get("start") or DEFAULT_START
+    with _cache_lock(cache):
+        df, fetched_at, _ = _sync_cache(symbol, start, adjust, source, False, [], sync=True)
+    df, _ = _drop_partial_bar(df, fetched_at, datetime.now())
+    return df.index[-1].date().isoformat()
 
 
 def _with_meta(df, *, source, adjust, symbol, cached, cache, fetched_at, dropped, warnings) -> pd.DataFrame:

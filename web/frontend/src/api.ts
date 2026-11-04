@@ -92,7 +92,12 @@ export const api = {
       "/api/holdings/import",
       json("POST", { text, mode, dry_run: false }),
     ),
-  analysis: (sync = false) => request<HoldingsAnalysis>(`/api/holdings/analysis${sync ? "?sync=true" : ""}`),
+  analysis: () => request<HoldingsAnalysis>("/api/holdings/analysis"),
+  sync: () =>
+    request<{ count: number; data_date: string | null; behind: string[]; errors: Record<string, string> }>(
+      "/api/sync",
+      { method: "POST" },
+    ),
   checkup: (force: boolean, symbols?: string[]) =>
     request<{ job: Job | null; message?: string }>("/api/holdings/checkup", json("POST", { force, symbols })),
   job: (id: string) => request<Job>(`/api/jobs/${encodeURIComponent(id)}`),
@@ -101,7 +106,7 @@ export const api = {
     request<KlineResponse>(
       `/api/kline/${encodeURIComponent(symbol)}?days=${days}${strategy ? `&strategy=${strategy}` : ""}`,
     ),
-  watchlist: (sync = false) => request<WatchlistResponse>(`/api/watchlist${sync ? "?sync=true" : ""}`),
+  watchlist: () => request<WatchlistResponse>("/api/watchlist"),
   saveWatch: (item: Partial<WatchItem>) =>
     request<{ item: WatchItem; job: Job | null }>("/api/watchlist", json("PUT", item)),
   addWatch: (text: string, group?: string) =>

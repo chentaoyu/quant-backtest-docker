@@ -263,12 +263,12 @@ def resolve_strategy(strategy: str | None, params: dict | None, check: dict | No
     return name, live or _default_params(STRATEGIES[name]), source
 
 
-def _cached(kind: str, symbol: str, key: object, compute, force: bool = False):
+def _cached(kind: str, symbol: str, key: object, compute):
     """同一交易日内、输入不变时复用分析结果；数据还没到最近收盘日的不复用（数据源可能晚发布）。"""
     session = last_session_close(datetime.now())
     full_key = json.dumps([key, session.isoformat()], sort_keys=True, default=str)
     hit = _ANALYSIS_CACHE.get(f"{kind}:{symbol}")
-    if not force and hit and hit[0] == full_key and (hit[1].get("data_date") or "") >= session.date().isoformat():
+    if hit and hit[0] == full_key and (hit[1].get("data_date") or "") >= session.date().isoformat():
         return hit[1]
     result = compute()
     _ANALYSIS_CACHE[f"{kind}:{symbol}"] = (full_key, result)
@@ -314,10 +314,10 @@ def _advice(holding: dict, pnl_pct: float, main: dict | None, checked: bool) -> 
     return "WAIT", f"{label}已于 {main['since'] or '—'} 离场，你的持仓与策略不一致，可减仓或等待买回信号"
 
 
-def analyze_holding(holding: dict, check: dict | None, sync: bool = False) -> dict:
+def analyze_holding(holding: dict, check: dict | None) -> dict:
     symbol = holding["symbol"]
     start = min(_years_ago(SIGNAL_YEARS), (holding.get("buy_date") or "9999").replace("-", ""))
-    df = load_daily(symbol, start=start, sync=sync)
+    df = load_daily(symbol, start=start)
     meta = df.attrs.get("meta") or {}
     signal_df = df.loc[pd.Timestamp(_years_ago(SIGNAL_YEARS)) :]
 
@@ -370,15 +370,14 @@ def analyze_holding(holding: dict, check: dict | None, sync: bool = False) -> di
     }
 
 
-def analyze_all(sync: bool = False) -> dict:
+def analyze_all() -> dict:
     holdings = list_holdings()
     checkups = load_checkups()
 
     def one(h: dict) -> dict:
         check = checkups.get(h["symbol"])
         try:
-            return _cached("holding", h["symbol"], [h, check and check["checked_at"]],
-                           lambda: analyze_holding(h, check, sync), force=sync)
+            return _cached("holding", h["symbol"], [h, check and check["checked_at"]], lambda: analyze_holding(h, check))
         except Exception as exc:  # noqa: BLE001 - 单只失败照样展示
             return {**h, "error": str(exc), "advice": None}
 
@@ -419,9 +418,9 @@ def _last_event(trades: list[dict]) -> dict | None:
     return {"date": date, "action": action, "price": price}
 
 
-def analyze_watch_item(item: dict, check: dict | None, sync: bool = False) -> dict:
+def analyze_watch_item(item: dict, check: dict | None) -> dict:
     symbol = item["symbol"]
-    df = load_daily(symbol, start=_years_ago(SIGNAL_YEARS), sync=sync)
+    df = load_daily(symbol, start=_years_ago(SIGNAL_YEARS))
     close, prev = float(df["Close"].iloc[-1]), float(df["Close"].iloc[-2])
     name, params, source = resolve_strategy(item.get("strategy"), item.get("params"), check)
     sharpes = {k: (v or {}).get("oos_sharpe") for k, v in (check or {}).get("strategies", {}).items()}
@@ -450,7 +449,7 @@ def analyze_watch_item(item: dict, check: dict | None, sync: bool = False) -> di
     }
 
 
-def analyze_watchlist(sync: bool = False) -> dict:
+def analyze_watchlist() -> dict:
     items = watchlist.list_items()
     checkups = load_checkups()
 
@@ -458,7 +457,7 @@ def analyze_watchlist(sync: bool = False) -> dict:
         check = checkups.get(item["symbol"])
         try:
             return _cached("watch", item["symbol"], [item, check and check["checked_at"]],
-                           lambda: analyze_watch_item(item, check, sync), force=sync)
+                           lambda: analyze_watch_item(item, check))
         except Exception as exc:  # noqa: BLE001
             return {**item, "error": str(exc), "signal": None, "used": None}
 

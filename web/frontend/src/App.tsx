@@ -17,7 +17,7 @@ import {
   Typography,
 } from "antd";
 import { Form } from "antd";
-import { SettingOutlined } from "@ant-design/icons";
+import { SettingOutlined, SyncOutlined } from "@ant-design/icons";
 import dayjs from "dayjs";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "./api";
@@ -82,6 +82,24 @@ export default function App() {
   const [retry, setRetry] = useState(0);
   const [booted, setBooted] = useState(false);
   const [view, setView] = useState<View>("single");
+  const [syncing, setSyncing] = useState(false);
+  const [syncVersion, setSyncVersion] = useState(0);
+
+  const syncData = async () => {
+    setSyncing(true);
+    try {
+      const r = await api.sync();
+      const failed = Object.keys(r.errors).length;
+      const lagging = r.behind.length ? `，${r.behind.join("、")} 尚未更新` : "";
+      if (failed) message.warning(`同步完成，数据截至 ${r.data_date ?? "-"}，${failed} 只失败${lagging}`);
+      else message.success(`已同步 ${r.count} 只，数据截至 ${r.data_date ?? "-"} 收盘${lagging}`);
+      setSyncVersion((v) => v + 1);
+    } catch (error) {
+      message.error((error as Error).message);
+    } finally {
+      setSyncing(false);
+    }
+  };
   // 盯盘告警全局订阅：任何页面都弹通知；未查看的注意/告警数显示在“盯盘”页签上
   const { incoming, connected } = useAlertStream();
   const [seenAlertId, setSeenAlertId] = useState(0);
@@ -353,6 +371,11 @@ export default function App() {
                 </Tag>
               </Tooltip>
             )}
+            <Tooltip title="把持仓、自选、模拟仓用到的股票立即补到最新收盘日，各页面随之刷新">
+              <Button size="small" icon={<SyncOutlined />} loading={syncing} onClick={() => void syncData()}>
+                同步数据
+              </Button>
+            </Tooltip>
             <Tooltip title={agentOk === false ? "Agent / 模型服务异常，点击查看" : "Agent 模型、盯盘与通知设置"}>
               <Badge dot status={agentOk === false ? "error" : "success"} offset={[-4, 0]}>
                 <Tag icon={<SettingOutlined />} style={{ cursor: "pointer", marginInlineEnd: 0 }} onClick={() => setAgentOpen(true)}>
@@ -415,11 +438,11 @@ export default function App() {
               {view === "monitor" ? (
                 <MonitorPanel incoming={incoming} connected={connected} onOpenSettings={() => setAgentOpen(true)} />
               ) : view === "watchlist" && meta ? (
-                <WatchlistPanel meta={meta} stocks={stocks} stocksLoading={stocksLoading} />
+                <WatchlistPanel key={syncVersion} meta={meta} stocks={stocks} stocksLoading={stocksLoading} />
               ) : view === "sim" ? (
-                <SimPanel stocks={stocks} stocksLoading={stocksLoading} />
+                <SimPanel key={syncVersion} stocks={stocks} stocksLoading={stocksLoading} />
               ) : view === "holdings" && meta ? (
-                <HoldingsPanel meta={meta} stocks={stocks} stocksLoading={stocksLoading} />
+                <HoldingsPanel key={syncVersion} meta={meta} stocks={stocks} stocksLoading={stocksLoading} />
               ) : (
             <Row gutter={[16, 16]} align="top">
               <Col xs={24} lg={8} xl={6}>
